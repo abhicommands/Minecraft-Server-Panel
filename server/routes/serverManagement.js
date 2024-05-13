@@ -159,7 +159,7 @@ router.get("/servers/:id/download", authenticate, findServer, (req, res) => {
   }
   if (fs.existsSync(fullPath)) {
     if (fs.lstatSync(fullPath).isDirectory()) {
-      res.setHeader("Content-Type", "routerlication/zip");
+      res.setHeader("Content-Type", "application/zip");
       res.setHeader(
         "Content-Disposition",
         "attachment; filename=" + path.basename(fullPath) + ".zip"

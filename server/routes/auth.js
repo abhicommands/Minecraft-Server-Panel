@@ -19,7 +19,6 @@ const authenticate = (req, res, next) => {
     req.user = { username: decoded.username };
     next();
   } catch (error) {
-    console.log("Invalid session for some reason.");
     res.status(401).json({ error: "Invalid session." });
   }
 };
