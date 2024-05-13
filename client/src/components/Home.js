@@ -17,6 +17,7 @@ function Home() {
       const response = await axios.get("http://localhost:3001/servers", {
         withCredentials: true,
       });
+      console.log(response.data.servers);
       setServers(response.data.servers);
       setUsername(response.data.username);
       setIsAuthenticated(true);

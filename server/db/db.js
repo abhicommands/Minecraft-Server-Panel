@@ -2,21 +2,24 @@ const sqlite3 = require("sqlite3").verbose();
 const path = require("path");
 const fs = require("fs-extra");
 
-const DB_PATH = path.join(__dirname, "/myServers.db");
+const DB_PATH = path.join(__dirname, "myServers.db");  // Removed the extra slash for better path handling
 fs.ensureFileSync(DB_PATH);
+
 const db = new sqlite3.Database(DB_PATH, (err) => {
-  if (err) console.error("Error opening database", err.message);
-  else {
+  if (err) {
+    console.error("Error opening database", err.message);
+  } else {
     console.log("Database connected.");
     db.run(
-      `
-      CREATE TABLE IF NOT EXISTS servers (
+      `CREATE TABLE IF NOT EXISTS servers (
         id TEXT PRIMARY KEY,
         name TEXT,
         path TEXT,
-        backupPath TEXT
-      )
-    `,
+        backupPath TEXT,
+        startupCommand TEXT,
+        version TEXT,
+        port INTEGER
+      )`,
       (err) => {
         if (err) console.error("Error creating table", err.message);
       }
@@ -24,7 +27,7 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
   }
 });
 
-//find servers middleware function
+// Find servers middleware function
 const findServer = (req, res, next) => {
   const serverId = req.params.id;
   db.get("SELECT * FROM servers WHERE id = ?", serverId, (err, row) => {
@@ -39,4 +42,4 @@ const findServer = (req, res, next) => {
   });
 };
 
-module.exports = { db , findServer};
+module.exports = { db, findServer };
