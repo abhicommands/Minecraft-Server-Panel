@@ -11,6 +11,14 @@ const user = {
     password: ROOT_PASSWORD_HASH,
   },
 };
+const authenticateSocket = (token, callback) => {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    callback(null, { username: decoded.username });
+  } catch (error) {
+    callback(new Error("Authentication error"));
+  }
+};
 
 const authenticate = (req, res, next) => {
   try {
@@ -51,4 +59,4 @@ router.get("/validate-session", authenticate, (req, res) => {
   res.json({ message: "Valid session" });
 });
 
-module.exports = { router, authenticate };
+module.exports = { router, authenticate, authenticateSocket };

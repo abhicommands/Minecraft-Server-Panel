@@ -98,6 +98,7 @@ const CreateMinecraftServer = () => {
             <option value="1.8.9">1.8.9</option>
             <option value="1.12.2">1.12.2</option>
             <option value="1.16.5">1.16.5</option>
+            <option value="1.20.4">1.20.4</option>
             <option value="latest">latest</option>
           </select>
         </label>

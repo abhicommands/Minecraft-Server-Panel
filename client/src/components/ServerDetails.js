@@ -2,9 +2,8 @@
 import React from "react";
 import { useParams, Link, Route, Routes } from "react-router-dom";
 import FileManager from "./FileManager";
+import ServerConsole from "./ServerConsole";
 import axios from "axios";
-// import ServerConsole from './ServerConsole';
-// import ServerBackup from './ServerBackup';
 
 function ServerDetails() {
   const { id } = useParams();
@@ -37,10 +36,9 @@ function ServerDetails() {
       {/* Sub-routes */}
       <Routes>
         <Route path="files" element={<FileManager />} />
-        {/* Uncomment and implement these routes when components are available */}
-        {/* <Route path="console" element={<ServerConsole />} />
-        <Route path="backup" element={<ServerBackup />} /> */}
-        <Route path="/" element={<FileManager />} />
+        <Route path="console" element={<ServerConsole />} />
+        {/* <Route path="backup" element={<ServerBackup />} /> */}
+        <Route path="/" element={<ServerConsole />} />
       </Routes>
     </div>
   );
