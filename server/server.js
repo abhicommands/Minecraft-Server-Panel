@@ -8,8 +8,7 @@ const {
   authenticateSocket,
 } = require("./routes/auth");
 const fileRoutes = require("./routes/fileRoutes");
-const config = require("./config/config");
-const { db } = require("./db/db");
+const { db, findServer } = require("./db/db");
 const fs = require("fs-extra");
 const path = require("path");
 const { v4: uuidv4 } = require("uuid");
@@ -20,17 +19,23 @@ const http = require("http");
 const cookie = require("cookie");
 
 const app = express();
-
+app.set("trust proxy", 1);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors({ origin: config.corsOrigin, credentials: true }));
+app.use(
+  cors({
+    origin: process.env.CORSORIGIN,
+    methods: ["GET", "POST", "DELETE"],
+    credentials: true,
+  })
+);
 app.use(cookieParser());
 
 const server = http.createServer(app);
 const io = socket(server, {
   cors: {
-    origin: "http://localhost:3000", // Specify the actual URL of your client
-    methods: ["GET", "POST"],
+    origin: process.env.CORSORIGIN,
+    methods: ["GET", "POST", "DELETE"],
     credentials: true, // Important for sending cookies and headers
   },
 });
@@ -52,11 +57,6 @@ const createTerminal = (id, logDir) => {
       io.to(id).emit("output", rawOutput);
     }
     logFile.write(rawOutput); // Log the output to the respective file
-  });
-  ptyProcess.on("exit", (code, signal) => {
-    logFile.end(
-      `Terminal ${id} exited with code ${code} and signal ${signal}\n`
-    );
   });
   return ptyProcess;
 };
@@ -95,8 +95,6 @@ app.post("/servers", authenticate, async (req, res) => {
       res.status(201).json({
         id: serverId,
         name,
-        path: serverRoot,
-        backupPath,
         startupCommand,
         version,
         port,
@@ -224,6 +222,10 @@ app.get("/servers", authenticate, (req, res) => {
     }
   });
 });
+//get server by id
+app.get("/servers/:id", authenticate, findServer, (req, res) => {
+  res.json(req.server);
+});
 //delete server
 app.delete("/servers/:id", authenticate, (req, res) => {
   const serverId = req.params.id;
@@ -242,9 +244,7 @@ app.delete("/servers/:id", authenticate, (req, res) => {
           res.send("Server deleted successfully");
         }
       });
-      //stop the terminal
       terminals[serverId].kill();
-      //delete the serverId from terminals
       delete terminals[serverId];
     }
   });
@@ -253,46 +253,49 @@ app.delete("/servers/:id", authenticate, (req, res) => {
 io.use((socket, next) => {
   const cookies = cookie.parse(socket.handshake.headers.cookie || "");
   const token = cookies.token;
+  const serverId = socket.handshake.headers["server-id"] || "";
+  if (!token) return next(new Error("Authentication error"));
+  if (!serverId) return next(new Error("Server ID not found"));
   authenticateSocket(token, (error, user) => {
     if (error) {
       return next(new Error("Authentication error"));
     }
     socket.user = user;
+    db.get("SELECT path FROM servers WHERE id = ?", [serverId], (err, row) => {
+      if (err || !row) {
+        socket.emit("output", "Error: Server not found");
+        return next(new Error("Server ID not found"));
+      }
+      const logFilePath = path.join(row.path, "../logs", "server.log");
+      if (!terminals[serverId])
+        terminals[serverId] = createTerminal(
+          serverId,
+          path.join(row.path, "../logs")
+        );
+      fs.ensureFileSync(logFilePath);
+      const history = fs.readFileSync(logFilePath, "utf8");
+      socket.emit("output", history);
+    });
+    socket.serverId = serverId;
     next();
   });
 });
 io.on("connection", (socket) => {
-  socket.on("join", (serverId) => {
-    socket.join(serverId);
-    console.log(`Socket joined server: ${serverId}`);
-
-    db.get("SELECT path FROM servers WHERE id = ?", [serverId], (err, row) => {
-      if (err || !row) {
-        socket.emit("output", "Error: Server not found");
-        return;
-      }
-      const logFilePath = path.join(row.path, "../logs", "server.log");
-      if (fs.existsSync(logFilePath)) {
-        const history = fs.readFileSync(logFilePath, "utf8");
-        socket.emit("output", history); // Send the contents of the log file
-      }
-    });
-  });
-
+  socket.join(socket.serverId);
+  console.log(`Socket joined server: ${socket.serverId}`);
   socket.on("command", (data) => {
-    const { serverId, command } = data;
-    const terminal = terminals[serverId];
+    const command = data;
+    const terminal = terminals[socket.serverId];
     if (terminal) {
       terminal.write(`${command}\n`);
     } else {
       socket.emit("output", "Error: Terminal not found");
     }
   });
-
   socket.on("disconnect", () => {
-    console.log("Session disconnected");
+    socket.disconnect();
+    console.log(`Socket disconnected from server: ${socket.serverId}`);
   });
-
   socket.on("error", (error) => {
     console.error("Socket.IO error:", error);
   });
@@ -301,6 +304,6 @@ io.on("connection", (socket) => {
 app.use(authRoutes);
 app.use(fileRoutes);
 
-server.listen(config.port, () => {
-  console.log(`Server is running on http://localhost:${config.port}`);
+server.listen(process.env.PORT, () => {
+  console.log(`Server is running on http://localhost:${process.env.PORT}`);
 });

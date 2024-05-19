@@ -1,19 +1,23 @@
 // ServerConsole.js
-import React, { useState, useEffect, useRef } from "react";
+import React, { useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import io from "socket.io-client";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 // Establish socket connection with the token
-const socket = io("http://localhost:3001", {
-  withCredentials: true,
-});
 
 function ServerConsole() {
   const { id } = useParams();
+  const API_URL = process.env.REACT_APP_API_URL;
   const terminalRef = useRef(null);
   const fitAddon = new FitAddon();
+  const socket = io(`${API_URL}`, {
+    withCredentials: true,
+    extraHeaders: {
+      "server-id": id,
+    },
+  });
 
   useEffect(() => {
     const term = new Terminal({
@@ -26,9 +30,6 @@ function ServerConsole() {
     term.loadAddon(fitAddon);
     term.open(terminalRef.current);
     fitAddon.fit();
-
-    socket.emit("join", id);
-
     socket.on("output", (data) => {
       term.write(data);
     });
@@ -40,15 +41,14 @@ function ServerConsole() {
     window.addEventListener("resize", handleResize);
 
     return () => {
-      socket.off("output");
-      socket.emit("leave", id);
+      socket.disconnect();
       window.removeEventListener("resize", handleResize);
     };
   }, [id, fitAddon]);
 
   const sendCommand = (command) => {
     if (command.trim() !== "") {
-      socket.emit("command", { serverId: id, command });
+      socket.emit("command", command);
     }
   };
 

@@ -7,6 +7,7 @@ function Home() {
   const [servers, setServers] = useState([]);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [username, setUsername] = useState(null);
+  const API_URL = process.env.REACT_APP_API_URL;
 
   useEffect(() => {
     fetchServers();
@@ -14,10 +15,9 @@ function Home() {
 
   const fetchServers = async () => {
     try {
-      const response = await axios.get("http://localhost:3001/servers", {
+      const response = await axios.get(`${API_URL}/servers`, {
         withCredentials: true,
       });
-      console.log(response.data.servers);
       setServers(response.data.servers);
       setUsername(response.data.username);
       setIsAuthenticated(true);
@@ -25,11 +25,10 @@ function Home() {
       setIsAuthenticated(false);
     }
   };
-
   const handleLogout = async () => {
     try {
       await axios.post(
-        "http://localhost:3001/logout",
+        `${API_URL}/logout`,
         {},
         {
           withCredentials: true,
@@ -42,7 +41,6 @@ function Home() {
       console.error("Logout failed:", error);
     }
   };
-
   return (
     <div>
       {!isAuthenticated ? (
@@ -58,7 +56,7 @@ function Home() {
             <ul>
               {servers.map((server) => (
                 <li key={server.id}>
-                  <Link to={`/server/${server.id}`}>{server.name}</Link>
+                  <Link to={`/server/${server.id}/`}>{server.name}</Link>
                 </li>
               ))}
             </ul>

@@ -8,16 +8,13 @@ function FileManager() {
   const [files, setFiles] = useState([]);
   const [path, setPath] = useState("");
   const [newFolderName, setNewFolderName] = useState("");
-
+  const API_URL = process.env.REACT_APP_API_URL;
   const fetchFiles = async () => {
     try {
-      const response = await axios.get(
-        `http://localhost:3001/servers/${id}/files`,
-        {
-          params: { path }, // Using params object to properly include query parameters
-          withCredentials: true,
-        }
-      );
+      const response = await axios.get(`${API_URL}/${id}/files`, {
+        params: { path }, // Using params object to properly include query parameters
+        withCredentials: true,
+      });
       setFiles(response.data);
     } catch (error) {
       console.error("Error fetching files:", error);
@@ -34,7 +31,7 @@ function FileManager() {
       formData.append("files", file);
     });
     try {
-      await axios.post(`http://localhost:3001/servers/${id}/upload`, formData, {
+      await axios.post(`${API_URL}/servers/${id}/upload`, formData, {
         params: { path }, // Including path as a query parameter
         headers: { "Content-Type": "multipart/form-data" },
         withCredentials: true,
@@ -54,7 +51,7 @@ function FileManager() {
   const createFolder = async () => {
     try {
       await axios.post(
-        `http://localhost:3001/servers/${id}/folders`,
+        `${API_URL}/servers/${id}/folders`,
         { name: newFolderName },
         {
           params: { path }, // Passing the path as a query parameter
@@ -74,17 +71,17 @@ function FileManager() {
 
   const downloadFile = async (filePath) => {
     try {
-      const response = await axios.get(
-        `http://localhost:3001/servers/${id}/download`,
-        {
-          params: { filePath }, // Correct usage of params to send query parameters
-          responseType: "blob",
-          withCredentials: true,
-        }
-      );
+      const response = await axios.get(`${API_URL}/servers/${id}/download`, {
+        params: { filePath }, // Correct usage of params to send query parameters
+        responseType: "blob",
+        withCredentials: true,
+      });
       const contentType = response.headers["content-type"];
       let fileName = filePath.split("/").pop();
-      if (contentType.includes("application/zip") && !fileName.endsWith(".zip")) {
+      if (
+        contentType.includes("application/zip") &&
+        !fileName.endsWith(".zip")
+      ) {
         fileName += ".zip";
       }
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -101,7 +98,7 @@ function FileManager() {
 
   const deleteFile = async (filePath) => {
     try {
-      await axios.delete(`http://localhost:3001/servers/${id}/files`, {
+      await axios.delete(`${API_URL}/servers/${id}/files`, {
         params: { filePath },
         withCredentials: true,
       });
@@ -112,7 +109,7 @@ function FileManager() {
   };
   const unarchiveFile = async (filePath) => {
     try {
-      await axios.get(`http://localhost:3001/servers/${id}/unarchive`, {
+      await axios.get(`${API_URL}/servers/${id}/unarchive`, {
         params: { filePath },
         withCredentials: true,
       });

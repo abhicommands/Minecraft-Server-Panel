@@ -4,12 +4,13 @@ import axios from "axios";
 function Login({ onLoginSuccess }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const API_URL = process.env.REACT_APP_API_URL;
 
   const handleLogin = async (event) => {
     event.preventDefault();
     try {
       await axios.post(
-        "http://localhost:3001/login",
+        `${API_URL}/login`,
         { username, password },
         { withCredentials: true }
       );

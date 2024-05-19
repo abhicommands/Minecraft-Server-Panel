@@ -1,7 +1,8 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { ROOT_PASSWORD_HASH, JWT_SECRET } = require("../config/config");
+const ROOT_PASSWORD_HASH = process.env.ROOT_PASSWORD_HASH;
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const router = express.Router();
 
@@ -27,6 +28,13 @@ const authenticate = (req, res, next) => {
     req.user = { username: decoded.username };
     next();
   } catch (error) {
+    if (req.cookies.token) {
+      res.clearCookie("token", {
+        httpOnly: true,
+        secure: true,
+        sameSite: "strict",
+      });
+    }
     res.status(401).json({ error: "Invalid session." });
   }
 };
@@ -38,6 +46,7 @@ router.post("/login", async (req, res) => {
     bcrypt.compareSync(password, user.admin.password)
   ) {
     const token = jwt.sign({ username }, JWT_SECRET, { expiresIn: "7d" });
+
     res.cookie("token", token, {
       httpOnly: true,
       secure: true,
@@ -51,7 +60,11 @@ router.post("/login", async (req, res) => {
 });
 
 router.post("/logout", (req, res) => {
-  res.clearCookie("token");
+  res.clearCookie("token", {
+    httpOnly: true,
+    secure: true,
+    sameSite: "strict",
+  });
   res.json({ message: "Logout successful" });
 });
 

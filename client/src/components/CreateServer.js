@@ -6,11 +6,12 @@ const CreateMinecraftServer = () => {
   const [memoryGB, setMemoryGB] = useState(1); // default to 1GB
   const [minecraftVersion, setMinecraftVersion] = useState("");
   const [port, setPort] = useState(25565); // default Minecraft port
+  const API_URL = process.env.REACT_APP_API_URL;
 
   // validate session
   useEffect(() => {
     axios
-      .get("http://localhost:3001/validate-session", { withCredentials: true })
+      .get(`${API_URL}/validate-session`, { withCredentials: true })
       .catch((error) => {
         window.location.href = "/";
       });
@@ -44,7 +45,7 @@ const CreateMinecraftServer = () => {
     // posts the data to the server using axios
     axios
       .post(
-        "http://localhost:3001/servers",
+        `${API_URL}/servers`,
         {
           name: serverName,
           memory: memoryGB,
