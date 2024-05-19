@@ -244,8 +244,10 @@ app.delete("/servers/:id", authenticate, (req, res) => {
           res.send("Server deleted successfully");
         }
       });
-      terminals[serverId].kill();
-      delete terminals[serverId];
+      if (terminals[serverId]) {
+        terminals[serverId].kill();
+        delete terminals[serverId];
+      }
     }
   });
 });

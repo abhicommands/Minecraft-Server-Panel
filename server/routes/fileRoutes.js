@@ -142,6 +142,4 @@ router.get("/servers/:id/unarchive", authenticate, findServer, (req, res) => {
     });
 });
 
-
-
 module.exports = router;

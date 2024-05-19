@@ -9,9 +9,10 @@ function FileManager() {
   const [path, setPath] = useState("");
   const [newFolderName, setNewFolderName] = useState("");
   const API_URL = process.env.REACT_APP_API_URL;
+
   const fetchFiles = async () => {
     try {
-      const response = await axios.get(`${API_URL}/${id}/files`, {
+      const response = await axios.get(`${API_URL}/servers/${id}/files`, {
         params: { path }, // Using params object to properly include query parameters
         withCredentials: true,
       });

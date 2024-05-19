@@ -3,19 +3,19 @@
   "version": "0.1.0",
   "private": true,
   "dependencies": {
-    "@testing-library/jest-dom": "^5.17.0",
-    "@testing-library/react": "^13.4.0",
-    "@testing-library/user-event": "^13.5.0",
+    "@testing-library/jest-dom": "^6.4.5",
+    "@testing-library/react": "^15.0.7",
+    "@testing-library/user-event": "^14.5.2",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "axios": "^1.6.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-dropzone": "^14.2.3",
-    "react-router-dom": "^6.23.0",
+    "react-router-dom": "^6.23.1",
     "react-scripts": "5.0.1",
     "socket.io-client": "^4.7.5",
-    "web-vitals": "^2.1.4"
+    "web-vitals": "^4.0.0"
   },
   "scripts": {
     "start": "react-scripts start",
