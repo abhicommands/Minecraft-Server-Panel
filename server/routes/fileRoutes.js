@@ -78,7 +78,7 @@ router.delete("/servers/:id/files", authenticate, findServer, (req, res) => {
   const normalizedPath = path.normalize(fullPath);
   if (
     !normalizedPath.startsWith(req.server.path) ||
-    fullPath === req.server.path
+    normalizedPath === req.server.path
   ) {
     return res.status(400).send("Invalid path or cannot delete root directory");
   }
