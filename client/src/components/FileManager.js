@@ -2,18 +2,21 @@ import React, { useState, useEffect } from "react";
 import { useParams } from "react-router-dom";
 import axios from "axios";
 import { useDropzone } from "react-dropzone";
+import EditFile from "./EditFile"; // Assuming you create a new component for editing files
 
 function FileManager() {
   const { id } = useParams();
   const [files, setFiles] = useState([]);
   const [path, setPath] = useState("");
   const [newFolderName, setNewFolderName] = useState("");
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [editingFile, setEditingFile] = useState(null); // File being edited
   const API_URL = process.env.REACT_APP_API_URL;
 
   const fetchFiles = async () => {
     try {
       const response = await axios.get(`${API_URL}/servers/${id}/files`, {
-        params: { path }, // Using params object to properly include query parameters
+        params: { path },
         withCredentials: true,
       });
       setFiles(response.data);
@@ -33,7 +36,7 @@ function FileManager() {
     });
     try {
       await axios.post(`${API_URL}/servers/${id}/upload`, formData, {
-        params: { path }, // Including path as a query parameter
+        params: { path },
         headers: { "Content-Type": "multipart/form-data" },
         withCredentials: true,
       });
@@ -55,7 +58,7 @@ function FileManager() {
         `${API_URL}/servers/${id}/folders`,
         { name: newFolderName },
         {
-          params: { path }, // Passing the path as a query parameter
+          params: { path },
           withCredentials: true,
         }
       );
@@ -70,21 +73,17 @@ function FileManager() {
     setPath(newPath);
   };
 
-  const downloadFile = async (filePath) => {
+  const downloadFiles = async () => {
     try {
-      const response = await axios.get(`${API_URL}/servers/${id}/download`, {
-        params: { filePath }, // Correct usage of params to send query parameters
-        responseType: "blob",
-        withCredentials: true,
-      });
-      const contentType = response.headers["content-type"];
-      let fileName = filePath.split("/").pop();
-      if (
-        contentType.includes("application/zip") &&
-        !fileName.endsWith(".zip")
-      ) {
-        fileName += ".zip";
-      }
+      const response = await axios.post(
+        `${API_URL}/servers/${id}/files/download`,
+        { files: selectedFiles },
+        {
+          responseType: "blob",
+          withCredentials: true,
+        }
+      );
+      const fileName = "downloaded_files.zip";
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
@@ -93,21 +92,26 @@ function FileManager() {
       link.click();
       link.parentNode.removeChild(link);
     } catch (error) {
-      console.error("Error downloading file:", error);
+      console.error("Error downloading files:", error);
     }
   };
 
-  const deleteFile = async (filePath) => {
+  const deleteFiles = async () => {
     try {
-      await axios.delete(`${API_URL}/servers/${id}/files`, {
-        params: { filePath },
-        withCredentials: true,
-      });
+      await axios.post(
+        `${API_URL}/servers/${id}/files/delete/`,
+        { files: selectedFiles },
+        {
+          withCredentials: true,
+        }
+      );
+      setSelectedFiles([]);
       fetchFiles();
     } catch (error) {
-      console.error("Error deleting file:", error);
+      console.error("Error deleting files:", error);
     }
   };
+
   const unarchiveFile = async (filePath) => {
     try {
       await axios.get(`${API_URL}/servers/${id}/unarchive`, {
@@ -118,6 +122,65 @@ function FileManager() {
     } catch (error) {
       console.error("Error unarchiving file:", error);
     }
+  };
+
+  const toggleFileSelection = (fileName) => {
+    setSelectedFiles((prevSelectedFiles) =>
+      prevSelectedFiles.includes(fileName)
+        ? prevSelectedFiles.filter((file) => file !== fileName)
+        : [...prevSelectedFiles, fileName]
+    );
+  };
+
+  const editableExtensions = [".txt", ".json", ".properties"]; // Add other extensions as needed
+
+  const isEditable = (fileName) => {
+    return editableExtensions.some((ext) => fileName.endsWith(ext));
+  };
+
+  const openFileEditor = async (filePath) => {
+    try {
+      const response = await axios.get(`${API_URL}/servers/${id}/files/read`, {
+        params: { filePath },
+        withCredentials: true,
+      });
+      setEditingFile({ path: filePath, content: response.data });
+    } catch (error) {
+      console.error("Error reading file:", error);
+    }
+  };
+
+  const renderBreadcrumbs = () => {
+    const pathSegments = path.split("/").filter(Boolean);
+    const breadcrumbs = pathSegments.map((segment, index) => {
+      const breadcrumbPath = pathSegments.slice(0, index + 1).join("/");
+      return (
+        <span
+          key={breadcrumbPath}
+          onClick={() => setPath(breadcrumbPath)}
+          style={{ cursor: "pointer", color: "blue" }}
+        >
+          {segment}
+        </span>
+      );
+    });
+
+    return (
+      <div>
+        <span
+          onClick={() => setPath("")}
+          style={{ cursor: "pointer", color: "blue" }}
+        >
+          root
+        </span>
+        {breadcrumbs.map((crumb, index) => (
+          <React.Fragment key={index}>
+            {" / "}
+            {crumb}
+          </React.Fragment>
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -132,11 +195,7 @@ function FileManager() {
     >
       <input {...getInputProps()} />
       <h2>File Manager</h2>
-      {path && (
-        <button onClick={() => setPath(path.split("/").slice(0, -1).join("/"))}>
-          Go Back
-        </button>
-      )}
+      {renderBreadcrumbs()}
       <div>
         <input
           value={newFolderName}
@@ -145,36 +204,47 @@ function FileManager() {
         />
         <button onClick={createFolder}>Create Folder</button>
       </div>
+      {selectedFiles.length > 0 && (
+        <div>
+          <button onClick={downloadFiles}>Download Selected</button>
+          <button onClick={deleteFiles}>Delete Selected</button>
+        </div>
+      )}
       <ul>
         {files.map((file) => (
           <li key={file.name}>
             {file.type === "directory" ? (
               <span style={{ cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={selectedFiles.includes(`${path}/${file.name}`)}
+                  onChange={() => toggleFileSelection(`${path}/${file.name}`)}
+                />
                 <span
                   onClick={() => handleFolderChange(`${path}/${file.name}`)}
                   style={{ color: "blue" }}
                 >
                   [Folder] {file.name}
                 </span>
-                <button onClick={() => downloadFile(`${path}/${file.name}`)}>
-                  Download
-                </button>
-                <button onClick={() => deleteFile(`${path}/${file.name}`)}>
-                  Delete
-                </button>
               </span>
             ) : (
               <span>
+                <input
+                  type="checkbox"
+                  checked={selectedFiles.includes(`${path}/${file.name}`)}
+                  onChange={() => toggleFileSelection(`${path}/${file.name}`)}
+                />
                 {file.name}
-                <button onClick={() => downloadFile(`${path}/${file.name}`)}>
-                  Download
-                </button>
-                <button onClick={() => deleteFile(`${path}/${file.name}`)}>
-                  Delete
-                </button>
                 {file.name.endsWith(".zip") && (
                   <button onClick={() => unarchiveFile(`${path}/${file.name}`)}>
                     Unarchive
+                  </button>
+                )}
+                {isEditable(file.name) && (
+                  <button
+                    onClick={() => openFileEditor(`${path}/${file.name}`)}
+                  >
+                    Edit
                   </button>
                 )}
               </span>
@@ -183,6 +253,9 @@ function FileManager() {
         ))}
       </ul>
       <p>Drag 'n' drop files here, or click to select files</p>
+      {editingFile && (
+        <EditFile file={editingFile} onClose={() => setEditingFile(null)} />
+      )}
     </div>
   );
 }

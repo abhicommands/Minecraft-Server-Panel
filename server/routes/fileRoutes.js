@@ -73,52 +73,78 @@ router.post("/servers/:id/folders", authenticate, findServer, (req, res) => {
   fs.ensureDirSync(folderPath);
   res.send("Folder created successfully");
 });
-router.delete("/servers/:id/files", authenticate, findServer, (req, res) => {
-  const fullPath = path.join(req.server.path, req.query.filePath || "");
-  const normalizedPath = path.normalize(fullPath);
-  if (
-    !normalizedPath.startsWith(req.server.path) ||
-    normalizedPath === req.server.path
-  ) {
-    return res.status(400).send("Invalid path or cannot delete root directory");
+
+router.post(
+  "/servers/:id/files/delete",
+  authenticate,
+  findServer,
+  (req, res) => {
+    const filesToDelete = req.body.files.map((file) =>
+      path.normalize(path.join(req.server.path, file))
+    );
+    filesToDelete.forEach((filePath) => {
+      if (!filePath.startsWith(req.server.path)) {
+        return res.status(400).send("Invalid path");
+      }
+      fs.removeSync(filePath);
+    });
+    res.send("Files deleted successfully");
   }
-  fs.remove(normalizedPath, (err) => {
-    if (err) {
-      console.error("Failed to delete file:", err);
-      return res.status(500).send("Failed to delete file");
-    } else {
-      res.send("File deleted successfully");
+);
+
+router.post(
+  "/servers/:id/files/download",
+  authenticate,
+  findServer,
+  (req, res) => {
+    const filesToDownload = req.body.files.map((file) =>
+      path.normalize(path.join(req.server.path, file))
+    );
+    if (
+      filesToDownload.length === 1 &&
+      fs.lstatSync(filesToDownload[0]).isFile() &&
+      fs.existsSync(filesToDownload[0]) &&
+      filesToDownload[0].startsWith(req.server.path)
+    ) {
+      res.download(filesToDownload[0]);
+      return;
     }
-  });
-});
-router.get("/servers/:id/download", authenticate, findServer, (req, res) => {
-  let fullPath = path.join(req.server.path, req.query.filePath || "");
-  fullPath = path.normalize(fullPath);
-  if (!fullPath.startsWith(req.server.path)) {
-    return res.status(400).send("Invalid file path");
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader(
+      "Content-Disposition",
+      "attachment; filename=downloaded_files.zip"
+    );
+    const archive = archiver("zip", { zlib: { level: 9 } });
+    archive.on("error", function (err) {
+      res.status(500).send("Error creating zip file: " + err.message);
+    });
+    archive.on("error", function (err) {
+      res.status(500).send("Error creating zip file: " + err.message);
+      archive.abort();
+    });
+    archive.pipe(res);
+    filesToDownload.forEach((filePath) => {
+      if (!fs.existsSync(filePath)) {
+        res.status(400).send("Invalid path");
+        archive.abort();
+        return;
+      }
+      if (!filePath.startsWith(req.server.path)) {
+        res.status(400).send("Invalid path");
+        archive.abort();
+        return;
+      }
+      if (fs.lstatSync(filePath).isDirectory()) {
+        archive.directory(filePath, path.basename(filePath));
+      } else if (fs.lstatSync(filePath).isFile()) {
+        archive.file(filePath, { name: path.basename(filePath) });
+      }
+    });
+
+    archive.finalize();
   }
-  if (fs.existsSync(fullPath)) {
-    if (fs.lstatSync(fullPath).isDirectory()) {
-      res.setHeader("Content-Type", "application/zip");
-      res.setHeader(
-        "Content-Disposition",
-        "attachment; filename=" + path.basename(fullPath) + ".zip"
-      );
-      const archive = archiver("zip", { zlib: { level: 9 } }); // Compression level: 9 is best compression
-      archive.on("error", function (err) {
-        res.status(500).send("Error creating zip file: " + err.message);
-      });
-      archive.pipe(res);
-      archive.directory(fullPath, false);
-      archive.finalize();
-    } else if (fs.lstatSync(fullPath).isFile()) {
-      res.download(fullPath);
-    }
-  } else {
-    res.status(404).send("File not found");
-  }
-});
-// unarchive a zip file
+);
+
 router.get("/servers/:id/unarchive", authenticate, findServer, (req, res) => {
   const fullPath = path.join(req.server.path, req.query.filePath || "");
   const normalizedPath = path.normalize(fullPath);
@@ -140,6 +166,42 @@ router.get("/servers/:id/unarchive", authenticate, findServer, (req, res) => {
       console.error("Failed to unarchive file:", err);
       res.status(500).send("Failed to unarchive file");
     });
+});
+
+router.get("/servers/:id/files/read", authenticate, findServer, (req, res) => {
+  const fullPath = path.join(req.server.path, req.query.filePath || "");
+  const normalizedPath = path.normalize(fullPath);
+  if (!normalizedPath.startsWith(req.server.path)) {
+    return res.status(400).send("Invalid path");
+  }
+  if (
+    !fs.existsSync(normalizedPath) ||
+    fs.lstatSync(normalizedPath).isDirectory()
+  ) {
+    return res.status(400).send("Invalid file path");
+  }
+  fs.readFile(normalizedPath, "utf8", (err, data) => {
+    if (err) {
+      console.error("Failed to read file:", err);
+      return res.status(500).send("Failed to read file");
+    }
+    res.send(data);
+  });
+});
+
+router.post("/servers/:id/files/save", authenticate, findServer, (req, res) => {
+  const fullPath = path.join(req.server.path, req.body.path || "");
+  const normalizedPath = path.normalize(fullPath);
+  if (!normalizedPath.startsWith(req.server.path)) {
+    return res.status(400).send("Invalid path");
+  }
+  fs.writeFile(normalizedPath, req.body.content, "utf8", (err) => {
+    if (err) {
+      console.error("Failed to save file:", err);
+      return res.status(500).send("Failed to save file");
+    }
+    res.send("File saved successfully");
+  });
 });
 
 module.exports = router;

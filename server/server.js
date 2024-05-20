@@ -218,13 +218,26 @@ app.get("/servers", authenticate, (req, res) => {
     if (err) {
       res.status(500).send("Failed to retrieve servers");
     } else {
-      res.json({ username: req.user.username, servers: rows });
+      //don't send the entire server rows information just send the name and some other details that were inputted by user when creating the server don't send root path
+      const servers = rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        version: row.version,
+        port: row.port,
+      }));
+      res.json({ servers, username: req.user.username });
     }
   });
 });
 //get server by id
 app.get("/servers/:id", authenticate, findServer, (req, res) => {
-  res.json(req.server);
+  //dont send all the information just send crucial information that the user inputted when creating the server
+  res.json({
+    id: req.server.id,
+    name: req.server.name,
+    version: req.server.version,
+    port: req.server.port,
+  });
 });
 //delete server
 app.delete("/servers/:id", authenticate, (req, res) => {
