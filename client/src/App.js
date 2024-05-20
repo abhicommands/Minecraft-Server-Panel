@@ -16,6 +16,7 @@ function App() {
         <Route path="/" element={<Home />} />
         <Route path="/server/:id/*" element={<ServerDetails />} />
         <Route path="/create-server" element={<CreateServer />} />
+        <Route path="*" element={<h1>Page Doesn't exist</h1>} />
       </Routes>
     </Router>
   );
