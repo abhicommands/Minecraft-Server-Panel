@@ -338,7 +338,7 @@ io.use((socket, next) => {
 });
 io.on("connection", (socket) => {
   socket.join(socket.serverId);
-  console.log("Socket connected:", socket.id);
+  console.log("Socket connected:", socket.serverId);
   const terminal = terminals[socket.serverId];
   socket.on("command", (data) => {
     if (terminal && terminal.isServerRunning) {
@@ -392,7 +392,7 @@ io.on("connection", (socket) => {
     }
   });
   socket.on("disconnect", () => {
-    console.log("Socket disconnected:", socket.id);
+    console.log("Socket disconnected:", socket.serverId);
     socket.disconnect();
   });
   socket.on("error", (error) => {

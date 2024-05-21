@@ -1,7 +1,6 @@
 const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const ROOT_PASSWORD_HASH = process.env.ROOT_PASSWORD_HASH;
 const JWT_SECRET = process.env.JWT_SECRET;
 
 const router = express.Router();
@@ -9,8 +8,8 @@ const router = express.Router();
 const secureStatus = process.env.SECURE_STATUS === "true" ? true : false;
 const user = {
   admin: {
-    username: "admin",
-    password: ROOT_PASSWORD_HASH,
+    username: process.env.ROOT_USERNAME,
+    password: process.env.ROOT_PASSWORD_HASH,
   },
 };
 const authenticateSocket = (token, callback) => {
