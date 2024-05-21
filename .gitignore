@@ -14,7 +14,7 @@ node_modules/
 myServers.db
 server-directory/
 # production
-/build
+build/
 
 # misc
 .DS_Store

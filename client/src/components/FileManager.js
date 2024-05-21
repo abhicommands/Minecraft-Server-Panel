@@ -10,7 +10,8 @@ function FileManager() {
   const [path, setPath] = useState("");
   const [newFolderName, setNewFolderName] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
-  const [editingFile, setEditingFile] = useState(null); // File being edited
+  const [editingFile, setEditingFile] = useState(null);
+  const [destinationPath, setDestinationPath] = useState("");
   const API_URL = process.env.REACT_APP_API_URL;
 
   const fetchFiles = async () => {
@@ -111,6 +112,25 @@ function FileManager() {
       console.error("Error deleting files:", error);
     }
   };
+  const moveFiles = async () => {
+    try {
+      await axios.post(
+        `${API_URL}/servers/${id}/files/move`,
+        {
+          files: selectedFiles,
+          destination: destinationPath,
+        },
+        {
+          withCredentials: true,
+        }
+      );
+      fetchFiles(); // Refresh files after moving
+      setDestinationPath(""); // Clear destination path input
+      setSelectedFiles([]); // Clear selection
+    } catch (error) {
+      console.error("Error moving files:", error);
+    }
+  };
 
   const unarchiveFile = async (filePath) => {
     try {
@@ -208,6 +228,12 @@ function FileManager() {
         <div>
           <button onClick={downloadFiles}>Download Selected</button>
           <button onClick={deleteFiles}>Delete Selected</button>
+          <input
+            value={destinationPath}
+            onChange={(e) => setDestinationPath(e.target.value)}
+            placeholder="Move to path"
+          />
+          <button onClick={moveFiles}>Move Selected</button>
         </div>
       )}
       <ul>

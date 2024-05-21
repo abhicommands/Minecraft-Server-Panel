@@ -203,5 +203,24 @@ router.post("/servers/:id/files/save", authenticate, findServer, (req, res) => {
     res.send("File saved successfully");
   });
 });
+//move selected files to a new location
+router.post("/servers/:id/files/move", authenticate, findServer, (req, res) => {
+  const filesToMove = req.body.files.map((file) =>
+    path.normalize(path.join(req.server.path, file))
+  );
+  const destination = path.normalize(
+    path.join(req.server.path, req.body.destination)
+  );
+  if (!destination.startsWith(req.server.path)) {
+    return res.status(400).send("Invalid path");
+  }
+  filesToMove.forEach((filePath) => {
+    if (!filePath.startsWith(req.server.path)) {
+      return res.status(400).send("Invalid path");
+    }
+    fs.moveSync(filePath, path.join(destination, path.basename(filePath)));
+  });
+  res.send("Files moved successfully");
+});
 
 module.exports = router;

@@ -41,7 +41,8 @@ const io = socket(server, {
 });
 
 let terminals = {};
-const createTerminal = (id, logDir) => {
+
+const createTerminal = (logDir, startupCommand) => {
   const shell = "bash";
   const pathOfRoot = path.join(logDir, "../root");
   const ptyProcess = pty.spawn(shell, [], {
@@ -49,16 +50,40 @@ const createTerminal = (id, logDir) => {
     cwd: pathOfRoot,
     env: process.env,
   });
-  fs.ensureDirSync(logDir); // Ensure the log directory exists
-  const logFilePath = `${logDir}/server.log`;
-  const logFile = fs.createWriteStream(logFilePath, { flags: "a" });
-  ptyProcess.on("data", function (rawOutput) {
-    if (io.sockets.adapter.rooms.get(id)) {
-      io.to(id).emit("output", rawOutput);
-    }
-    logFile.write(rawOutput); // Log the output to the respective file
+  fs.ensureDirSync(logDir);
+  let serverPID = null;
+  let isServerRunning = false; // Ensure the log directory exists
+  return { ptyProcess, isServerRunning, startupCommand, serverPID };
+};
+const initializeTerminal = (serverId, terminalPty, logDir) => {
+  const logFile = fs.createWriteStream(path.join(logDir, "server.log"), {
+    flags: "a",
   });
-  return ptyProcess;
+  terminalPty.ptyProcess.on("data", function (rawOutput) {
+    if (io.sockets.adapter.rooms.get(serverId))
+      io.to(serverId).emit("output", rawOutput);
+    logFile.write(rawOutput);
+    if (fs.existsSync(path.join(logDir, "../minecraft_pid.txt")))
+      terminalPty.serverPID = parseInt(
+        fs.readFileSync(path.join(logDir, "../minecraft_pid.txt"), "utf8")
+      );
+    if (terminalPty.serverPID) {
+      try {
+        process.kill(terminalPty.serverPID, 0);
+        terminalPty.isServerRunning = true;
+        if (io.sockets.adapter.rooms.get(serverId))
+          io.to(serverId).emit("serverStatus", true);
+      } catch (error) {
+        terminalPty.isServerRunning = false;
+        if (io.sockets.adapter.rooms.get(serverId))
+          io.to(serverId).emit("serverStatus", false);
+      }
+    } else {
+      terminalPty.isServerRunning = false;
+      if (io.sockets.adapter.rooms.get(serverId))
+        io.to(serverId).emit("serverStatus", false);
+    }
+  });
 };
 
 const SERVERS_BASE_PATH = path.join(__dirname, "server-directory");
@@ -73,16 +98,19 @@ app.post("/servers", authenticate, async (req, res) => {
   fs.ensureDirSync(backupPath);
   fs.ensureDirSync(path.join(serverPath, "logs")); //create a logs directory
   // Extracting request data with default values
-  const defaultStartupCommand =
-    "java -Xmx1024M -Xms1024M -jar server.jar nogui";
   const name = req.body.name || "Minecraft Server";
-  const startupCommand = req.body.startupCommand || defaultStartupCommand;
+  const startupCommand = `java -Xmx${req.body.memory}G -jar server.jar nogui`;
   const port = req.body.port || 25565;
   const version =
     req.body.version === "latest" || !req.body.version
       ? "stable"
       : req.body.version;
-  const terminal = createTerminal(serverId, path.join(serverPath, "logs"));
+  const logDir = path.join(serverPath, "logs");
+  const terminal = createTerminal(logDir, startupCommand);
+  //create the ptyprocess.on
+  terminals[serverId] = terminal;
+  terminalPty = terminals[serverId];
+  initializeTerminal(serverId, terminalPty, logDir);
   terminals[serverId] = terminal;
   db.run(
     "INSERT INTO servers (id, name, path, backupPath, startupCommand, version, port) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -95,7 +123,6 @@ app.post("/servers", authenticate, async (req, res) => {
       res.status(201).json({
         id: serverId,
         name,
-        startupCommand,
         version,
         port,
       });
@@ -218,7 +245,6 @@ app.get("/servers", authenticate, (req, res) => {
     if (err) {
       res.status(500).send("Failed to retrieve servers");
     } else {
-      //don't send the entire server rows information just send the name and some other details that were inputted by user when creating the server don't send root path
       const servers = rows.map((row) => ({
         id: row.id,
         name: row.name,
@@ -248,6 +274,13 @@ app.delete("/servers/:id", authenticate, (req, res) => {
     } else if (this.changes === 0) {
       res.status(404).send("Server not found");
     } else {
+      const terminal = terminals[serverId];
+      if (terminal) {
+        if (terminal.isServerRunning)
+          process.kill(terminal.serverPID, "SIGKILL");
+        terminal.ptyProcess.kill();
+        delete terminals[serverId];
+      }
       const serverPath = path.join(SERVERS_BASE_PATH, serverId);
       fs.remove(serverPath, (err) => {
         if (err) {
@@ -257,10 +290,6 @@ app.delete("/servers/:id", authenticate, (req, res) => {
           res.send("Server deleted successfully");
         }
       });
-      if (terminals[serverId]) {
-        terminals[serverId].kill();
-        delete terminals[serverId];
-      }
     }
   });
 });
@@ -276,40 +305,95 @@ io.use((socket, next) => {
       return next(new Error("Authentication error"));
     }
     socket.user = user;
-    db.get("SELECT path FROM servers WHERE id = ?", [serverId], (err, row) => {
-      if (err || !row) {
-        socket.emit("output", "Error: Server not found");
-        return next(new Error("Server ID not found"));
+    db.get(
+      "SELECT path, startupCommand FROM servers WHERE id = ?",
+      [serverId],
+      (err, row) => {
+        if (err || !row) {
+          socket.emit("output", "Error: Server not found");
+          return next(new Error("Server ID not found"));
+        }
+        const logFilePath = path.join(row.path, "../logs", "server.log");
+        if (!terminals[serverId]) {
+          terminals[serverId] = createTerminal(
+            path.join(row.path, "../logs"),
+            row.startupCommand
+          );
+          initializeTerminal(
+            serverId,
+            terminals[serverId],
+            path.join(row.path, "../logs")
+          );
+        }
+        fs.ensureFileSync(logFilePath);
+        const history = fs.readFileSync(logFilePath, "utf8");
+        socket.path = row.path;
+        socket.emit("output", history);
+        if (terminals[serverId].isServerRunning) {
+          socket.emit("serverStatus", true);
+        }
       }
-      const logFilePath = path.join(row.path, "../logs", "server.log");
-      if (!terminals[serverId])
-        terminals[serverId] = createTerminal(
-          serverId,
-          path.join(row.path, "../logs")
-        );
-      fs.ensureFileSync(logFilePath);
-      const history = fs.readFileSync(logFilePath, "utf8");
-      socket.emit("output", history);
-    });
+    );
     socket.serverId = serverId;
     next();
   });
 });
 io.on("connection", (socket) => {
   socket.join(socket.serverId);
-  console.log(`Socket joined server: ${socket.serverId}`);
+  const terminal = terminals[socket.serverId];
   socket.on("command", (data) => {
-    const command = data;
-    const terminal = terminals[socket.serverId];
-    if (terminal) {
-      terminal.write(`${command}\n`);
+    if (terminal && terminal.isServerRunning) {
+      terminal.ptyProcess.write(`${data}\n`);
     } else {
       socket.emit("output", "Error: Terminal not found");
     }
   });
+  socket.on("startServer", () => {
+    if (terminal && !terminal.isServerRunning) {
+      fs.ensureFileSync(
+        path.join(SERVERS_BASE_PATH, socket.serverId, "./minecraft_pid.txt")
+      );
+      terminal.ptyProcess.write(
+        `${terminal.startupCommand} & echo $! > ../minecraft_pid.txt; fg\n`
+      );
+    } else {
+      socket.emit(
+        "output",
+        "Error: command isn't valid or server is already running"
+      );
+    }
+  });
+  socket.on("stopServer", () => {
+    if (terminal && terminal.isServerRunning) {
+      terminal.ptyProcess.write("stop\n");
+      fs.removeSync(
+        path.join(SERVERS_BASE_PATH, socket.serverId, "./minecraft_pid.txt")
+      );
+    } else {
+      socket.emit(
+        "output",
+        "Error: Command isn't valid or server isn't running"
+      );
+    }
+  });
+  socket.on("killServer", () => {
+    if (terminal && terminal.isServerRunning) {
+      terminal.ptyProcess.kill();
+      //kill any child processes that were created during the terminals process
+      if (terminal.serverPID) {
+        process.kill(terminal.serverPID);
+      }
+      terminal.isServerRunning = false;
+      io.to(socket.serverId).emit("serverStatus", false);
+    } else {
+      socket.emit(
+        "output",
+        "Error: Command isn't valid or server isn't running"
+      );
+    }
+  });
   socket.on("disconnect", () => {
     socket.disconnect();
-    console.log(`Socket disconnected from server: ${socket.serverId}`);
   });
   socket.on("error", (error) => {
     console.error("Socket.IO error:", error);

@@ -40,7 +40,7 @@ const CreateMinecraftServer = () => {
       return;
     }
 
-    const startupCommand = `java -Xmx${memoryGB}G -Xms${memoryGB}G -jar server.jar nogui`;
+    const startupCommand = `java -Xmx${memoryGB}G -jar server.jar nogui`;
 
     // posts the data to the server using axios
     axios

@@ -1,54 +1,78 @@
-// ServerConsole.js
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import io from "socket.io-client";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-// Establish socket connection with the token
 
 function ServerConsole() {
   const { id } = useParams();
   const API_URL = process.env.REACT_APP_API_URL;
   const terminalRef = useRef(null);
-  const fitAddon = new FitAddon();
-  const socket = io(`${API_URL}`, {
-    withCredentials: true,
-    extraHeaders: {
-      "server-id": id,
-    },
-  });
+  const term = useRef(null);
+  const fitAddon = useRef(new FitAddon());
+  const [isServerRunning, setIsServerRunning] = useState(false);
+  const [socket, setSocket] = useState(null);
 
   useEffect(() => {
-    const term = new Terminal({
-      cursorBlink: true,
-      theme: {
-        background: "#000000",
-        foreground: "#ffffff",
+    const socketInstance = io(`${API_URL}`, {
+      withCredentials: true,
+      extraHeaders: {
+        "server-id": id,
       },
     });
-    term.loadAddon(fitAddon);
-    term.open(terminalRef.current);
-    fitAddon.fit();
-    socket.on("output", (data) => {
-      term.write(data);
+
+    setSocket(socketInstance);
+
+    socketInstance.on("serverStatus", (status) => {
+      setIsServerRunning(status);
     });
 
-    const handleResize = () => {
-      fitAddon.fit();
-    };
-
-    window.addEventListener("resize", handleResize);
+    socketInstance.on("output", (data) => {
+      if (term.current) {
+        term.current.write(data);
+      }
+    });
 
     return () => {
-      socket.disconnect();
-      window.removeEventListener("resize", handleResize);
+      socketInstance.disconnect();
     };
-  }, [id, fitAddon]);
+  }, [id, API_URL]);
+
+  useEffect(() => {
+    if (terminalRef.current) {
+      if (!term.current) {
+        term.current = new Terminal({
+          cursorBlink: true,
+          theme: {
+            background: "#000000",
+            foreground: "#ffffff",
+          },
+        });
+        term.current.loadAddon(fitAddon.current);
+        term.current.open(terminalRef.current);
+        fitAddon.current.fit();
+      } else {
+        fitAddon.current.fit();
+      }
+    }
+  }, [terminalRef]);
 
   const sendCommand = (command) => {
-    if (command.trim() !== "") {
+    if (command.trim() !== "" && isServerRunning && socket) {
       socket.emit("command", command);
+    }
+  };
+
+  const startServer = () => {
+    if (socket) {
+      socket.emit("startServer");
+    }
+  };
+
+  const stopServer = () => {
+    if (socket) {
+      socket.emit("stopServer");
     }
   };
 
@@ -62,6 +86,7 @@ function ServerConsole() {
       <div>
         <input
           type="text"
+          disabled={!isServerRunning}
           onKeyPress={(e) => {
             if (e.key === "Enter") {
               sendCommand(e.target.value);
@@ -75,10 +100,17 @@ function ServerConsole() {
             sendCommand(input.value);
             input.value = "";
           }}
+          disabled={!isServerRunning}
         >
           Send
         </button>
       </div>
+      <button onClick={startServer} disabled={isServerRunning}>
+        Start Server
+      </button>
+      <button onClick={stopServer} disabled={!isServerRunning}>
+        Stop Server
+      </button>
     </div>
   );
 }
