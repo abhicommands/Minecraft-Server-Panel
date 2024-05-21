@@ -7,7 +7,8 @@ import "@xterm/xterm/css/xterm.css";
 
 function ServerConsole() {
   const { id } = useParams();
-  const API_URL = process.env.REACT_APP_API_URL;
+  const API_URL = process.env.REACT_APP_SOCKET_URL;
+  const socketPath = process.env.REACT_APP_SOCKET_PATH;
   const terminalRef = useRef(null);
   const term = useRef(null);
   const fitAddon = useRef(new FitAddon());
@@ -20,6 +21,7 @@ function ServerConsole() {
       extraHeaders: {
         "server-id": id,
       },
+      path: socketPath,
     });
 
     setSocket(socketInstance);
