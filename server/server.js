@@ -11,7 +11,7 @@ const fileRoutes = require("./routes/fileRoutes");
 const { db, findServer } = require("./db/db");
 const fs = require("fs-extra");
 const path = require("path");
-const { v4: uuidv4 } = require("uuid");
+const { v4: uuidv4, validate } = require("uuid");
 const axios = require("axios");
 const pty = require("node-pty");
 const socket = require("socket.io");
@@ -57,6 +57,7 @@ const initializeTerminal = (serverId, terminalPty, logDir) => {
   const logFile = fs.createWriteStream(path.join(logDir, "server.log"), {
     flags: "a",
   });
+  fs.removeSync(path.join(logDir, "../minecraft_pid.txt"));
   terminalPty.ptyProcess.on("data", function (rawOutput) {
     if (io.sockets.adapter.rooms.get(serverId))
       io.to(serverId).emit("output", rawOutput);
@@ -99,10 +100,22 @@ app.post("/servers", authenticate, async (req, res) => {
   const name = req.body.name || "Minecraft Server";
   const startupCommand = `java -Xmx${req.body.memory}G -jar server.jar nogui`;
   const port = req.body.port || 25565;
-  const version =
-    req.body.version === "latest" || !req.body.version
-      ? "stable"
-      : req.body.version;
+  if (req.body.version === "latest" || !req.body.version) {
+    const response = await axios.get(
+      `https://meta.fabricmc.net/v2/versions/game/`
+    );
+    const stableVersion = response.data.find((version) => version.stable);
+    req.body.version = stableVersion.version;
+  } else {
+    const response = await axios.get(
+      `https://meta.fabricmc.net/v1/versions/game/${req.body.version}`
+    );
+    if (!response.data.length) {
+      res.status(400).send("Invalid version number");
+      return;
+    }
+  }
+  const version = req.body.version;
   const logDir = path.join(serverPath, "logs");
   const terminal = createTerminal(logDir, startupCommand);
   //create the ptyprocess.on
@@ -338,7 +351,6 @@ io.use((socket, next) => {
 });
 io.on("connection", (socket) => {
   socket.join(socket.serverId);
-  console.log("Socket connected:", socket.serverId);
   const terminal = terminals[socket.serverId];
   socket.on("command", (data) => {
     if (terminal && terminal.isServerRunning) {
@@ -392,7 +404,6 @@ io.on("connection", (socket) => {
     }
   });
   socket.on("disconnect", () => {
-    console.log("Socket disconnected:", socket.serverId);
     socket.disconnect();
   });
   socket.on("error", (error) => {

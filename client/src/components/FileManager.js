@@ -84,7 +84,8 @@ function FileManager() {
           withCredentials: true,
         }
       );
-      const fileName = "downloaded_files.zip";
+      const fileName =
+        selectedFiles.length === 1 ? selectedFiles[0] : "files.zip";
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement("a");
       link.href = url;
@@ -152,7 +153,7 @@ function FileManager() {
     );
   };
 
-  const editableExtensions = [".txt", ".json", ".properties"]; // Add other extensions as needed
+  const editableExtensions = [".txt", ".json", ".properties", ".log"]; // Add other extensions as needed
 
   const isEditable = (fileName) => {
     return editableExtensions.some((ext) => fileName.endsWith(ext));

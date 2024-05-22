@@ -8,6 +8,7 @@ import {
 } from "react-router-dom";
 import FileManager from "./FileManager";
 import ServerConsole from "./ServerConsole";
+import ServerBackup from "./ServerBackup";
 import axios from "axios";
 
 function ServerDetails() {
@@ -73,7 +74,7 @@ function ServerDetails() {
           {/* Sub-routes */}
           <Routes>
             <Route path="files" element={<FileManager />} />
-            {/* <Route path="backup" element={<ServerBackup />} /> */}
+            <Route path="backup" element={<ServerBackup />} />
             <Route path="/" element={<ServerConsole />} />
             <Route path="*" element={<h1>Not Found</h1>} />
           </Routes>

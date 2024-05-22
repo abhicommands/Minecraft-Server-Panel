@@ -180,6 +180,10 @@ router.get("/servers/:id/files/read", authenticate, findServer, (req, res) => {
   ) {
     return res.status(400).send("Invalid file path");
   }
+  const editableExtensions = [".txt", ".json", ".properties", ".log"]; // Add other extensions as needed
+  if (!editableExtensions.some((ext) => normalizedPath.endsWith(ext))) {
+    return res.status(400).send("File is not editable");
+  }
   fs.readFile(normalizedPath, "utf8", (err, data) => {
     if (err) {
       console.error("Failed to read file:", err);
@@ -222,5 +226,107 @@ router.post("/servers/:id/files/move", authenticate, findServer, (req, res) => {
   });
   res.send("Files moved successfully");
 });
+
+//create backups
+router.post("/servers/:id/backup", authenticate, findServer, (req, res) => {
+  const backupPath = path.join(req.server.backupPath);
+  fs.ensureDirSync(backupPath);
+  const archive = archiver("zip", { zlib: { level: 9 } });
+  const output = fs.createWriteStream(
+    path.join(backupPath, `backup-${Date.now()}.zip`)
+  );
+  archive.on("error", function (err) {
+    res.status(500).send("Error creating backup: " + err.message);
+  });
+  archive.pipe(output);
+  //create a backupmeta file
+  const worldPath = path.join(req.server.path, "world");
+  const modPath = path.join(req.server.path, "mods");
+  const serverJarPath = path.join(req.server.path, "server.jar");
+  archive.directory(worldPath, "world");
+  archive.directory(modPath, "mods");
+  archive.file(serverJarPath, { name: "server.jar" });
+  archive.finalize();
+  output.on("close", function () {
+    res.send("Backup created successfully");
+  });
+});
+//delete backup
+router.delete("/servers/:id/backup", authenticate, findServer, (req, res) => {
+  const backupPath = path.normalize(
+    path.join(req.server.backupPath, req.query.backup)
+  );
+  if (!backupPath.startsWith(req.server.backupPath)) {
+    return res.status(400).send("Invalid path");
+  }
+  fs.removeSync(backupPath);
+  res.send("Backup deleted successfully");
+});
+//get backups
+router.get("/servers/:id/backups", authenticate, findServer, (req, res) => {
+  const backupPath = path.join(req.server.backupPath);
+  fs.readdir(backupPath, (err, files) => {
+    if (err) {
+      console.error("Failed to read backups:", err);
+      return res.status(500).send("Failed to read backups");
+    }
+    const backups = files.map((file) => ({
+      name: file,
+      path: path.join(backupPath, file),
+    }));
+    res.json(backups);
+  });
+});
+//restore backup
+router.post(
+  "/servers/:id/backup/restore",
+  authenticate,
+  findServer,
+  (req, res) => {
+    const backupPath = path.normalize(
+      path.join(req.server.backupPath, req.body.backupName)
+    );
+    if (!backupPath.startsWith(req.server.backupPath)) {
+      return res.status(400).send("Invalid path");
+    }
+    if (!fs.existsSync(backupPath))
+      return res.status(400).send("Backup not found");
+    if (fs.existsSync(path.join(req.server.path, "server.jar"))) {
+      fs.removeSync(path.join(req.server.path, "server.jar"));
+    }
+    if (fs.existsSync(path.join(req.server.path, "world"))) {
+      fs.removeSync(path.join(req.server.path, "world"));
+    }
+    if (fs.existsSync(path.join(req.server.path, "mods"))) {
+      fs.removeSync(path.join(req.server.path, "mods"));
+    }
+    fs.createReadStream(backupPath)
+      .pipe(require("unzipper").Extract({ path: req.server.path }))
+      .promise()
+      .then(() => {
+        res.send("Backup restored successfully");
+      })
+      .catch((err) => {
+        console.error("Failed to restore backup:", err);
+        res.status(500).send("Failed to restore backup");
+      });
+  }
+);
+//download backup
+router.get(
+  "/servers/:id/backup/download",
+  authenticate,
+  findServer,
+  (req, res) => {
+    const backupPath = path.normalize(
+      path.join(req.server.backupPath, req.query.backup)
+    );
+    if (!backupPath.startsWith(req.server.backupPath)) {
+      return res.status(400).send("Invalid path");
+    }
+    if (fs.existsSync(backupPath)) res.download(backupPath);
+    else return res.status(400).send("Backup not found");
+  }
+);
 
 module.exports = router;
