@@ -100,8 +100,11 @@ app.post("/servers", authenticate, async (req, res) => {
   const name = req.body.name || "Minecraft Server";
   const startupCommand = `java -Xmx${req.body.memory}G -jar server.jar nogui`;
   const port = req.body.port || 25565;
-  if (req.body.version === "latest" || !req.body.version) {
+  if (req.body.version === "latest") {
     req.body.version = "stable";
+  } else if (!req.body.version) {
+    res.status(400).send("Version is required");
+    return;
   } else {
     const response = await axios.get(
       `https://meta.fabricmc.net/v1/versions/game/${req.body.version}`
