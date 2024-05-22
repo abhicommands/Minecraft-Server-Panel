@@ -101,11 +101,7 @@ app.post("/servers", authenticate, async (req, res) => {
   const startupCommand = `java -Xmx${req.body.memory}G -jar server.jar nogui`;
   const port = req.body.port || 25565;
   if (req.body.version === "latest" || !req.body.version) {
-    const response = await axios.get(
-      `https://meta.fabricmc.net/v2/versions/game/`
-    );
-    const stableVersion = response.data.find((version) => version.stable);
-    req.body.version = stableVersion.version;
+    req.body.version = "stable";
   } else {
     const response = await axios.get(
       `https://meta.fabricmc.net/v1/versions/game/${req.body.version}`
