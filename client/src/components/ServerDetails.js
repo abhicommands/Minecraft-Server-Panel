@@ -15,6 +15,7 @@ function ServerDetails() {
   const { id } = useParams();
   const API_URL = process.env.REACT_APP_API_URL;
   const [serverExists, setServerExists] = useState(false);
+  const [minecraftVersion, setMinecraftVersion] = useState("");
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -52,6 +53,26 @@ function ServerDetails() {
       navigate(path);
     }
   };
+  const updateServerVersion = async () => {
+    if (!minecraftVersion) {
+      alert("Please enter a Minecraft version");
+      return;
+    }
+    try {
+      const response = await axios.post(
+        `${API_URL}/servers/${id}/update`,
+        {
+          version: minecraftVersion,
+        },
+        { withCredentials: true }
+      );
+      console.log("Server updated:", response.data);
+      alert("Server updated successfully!");
+    } catch (err) {
+      console.error("Failed to update server:", err);
+      alert("Failed to update server!");
+    }
+  };
 
   return (
     <div>
@@ -70,8 +91,13 @@ function ServerDetails() {
             <button onClick={() => handleNavigation("backup")}>Backup</button>
             <button onClick={deleteServer}>Delete Server</button>
           </nav>
-
-          {/* Sub-routes */}
+          <input
+            type="text"
+            placeholder="Enter Minecraft version"
+            value={minecraftVersion}
+            onChange={(e) => setMinecraftVersion(e.target.value)}
+          />
+          <button onClick={updateServerVersion}>Update Version</button>
           <Routes>
             <Route path="files" element={<FileManager />} />
             <Route path="backup" element={<ServerBackup />} />

@@ -25,6 +25,7 @@
     "node-pty": "^1.0.0",
     "socket.io": "^4.7.5",
     "sqlite3": "^5.1.7",
+    "tree-kill": "^1.2.2",
     "unzipper": "^0.11.6",
     "uuid": "^9.0.1"
   }

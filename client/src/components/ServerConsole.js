@@ -14,6 +14,7 @@ function ServerConsole() {
   const fitAddon = useRef(new FitAddon());
   const [isServerRunning, setIsServerRunning] = useState(false);
   const [socket, setSocket] = useState(null);
+  const [serverStopped, setServerStopped] = useState(false);
 
   useEffect(() => {
     const socketInstance = io(`${API_URL}`, {
@@ -28,6 +29,7 @@ function ServerConsole() {
 
     socketInstance.on("serverStatus", (status) => {
       setIsServerRunning(status);
+      if (!status) setServerStopped(false); // Reset the button state when server is running
     });
 
     socketInstance.on("output", (data) => {
@@ -75,6 +77,14 @@ function ServerConsole() {
   const stopServer = () => {
     if (socket) {
       socket.emit("stopServer");
+      setServerStopped(true);
+    }
+  };
+
+  const killServer = () => {
+    if (socket) {
+      socket.emit("killServer");
+      setServerStopped(false); // Reset the button state after killing the server
     }
   };
 
@@ -110,8 +120,11 @@ function ServerConsole() {
       <button onClick={startServer} disabled={isServerRunning}>
         Start Server
       </button>
-      <button onClick={stopServer} disabled={!isServerRunning}>
-        Stop Server
+      <button
+        onClick={serverStopped ? killServer : stopServer}
+        disabled={!isServerRunning && !serverStopped}
+      >
+        {serverStopped ? "Kill Server" : "Stop Server"}
       </button>
     </div>
   );

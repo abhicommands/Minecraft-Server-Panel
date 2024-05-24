@@ -1,0 +1,38 @@
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+  background-color: #f0f2f5;
+}
+
+.login-box {
+  padding: 48px;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  width: 400px; /* Increase width */
+}
+
+.ant-form-item {
+  margin-bottom: 24px; /* Increase spacing between form items */
+}
+
+.ant-input-affix-wrapper,
+.ant-input,
+.ant-input-password {
+  height: 50px; /* Increase height of input fields */
+  font-size: 18px; /* Increase font size */
+  padding: 0 16px; /* Add padding to center text */
+  line-height: 50px; /* Center text vertically */
+}
+
+.ant-input::placeholder,
+.ant-input-password::placeholder {
+  line-height: 50px; /* Center placeholder text vertically */
+}
+
+.ant-btn {
+  height: 50px; /* Increase height of button */
+  font-size: 18px; /* Increase font size */
+}

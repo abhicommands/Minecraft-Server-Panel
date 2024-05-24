@@ -1,13 +1,14 @@
-import React, { useState } from "react";
+import React from "react";
+import { Form, Input, Button } from "antd";
+import { LockOutlined, UserOutlined } from "@ant-design/icons";
 import axios from "axios";
+import "./Login.css";
 
-function Login({ onLoginSuccess }) {
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+const Login = ({ onLoginSuccess }) => {
   const API_URL = process.env.REACT_APP_API_URL;
 
-  const handleLogin = async (event) => {
-    event.preventDefault();
+  const onFinish = async (values) => {
+    const { username, password } = values;
     try {
       await axios.post(
         `${API_URL}/login`,
@@ -21,26 +22,49 @@ function Login({ onLoginSuccess }) {
   };
 
   return (
-    <form onSubmit={handleLogin}>
-      <label>
-        Username:
-        <input
-          type="text"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-        />
-      </label>
-      <label>
-        Password:
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-      </label>
-      <button type="submit">Login</button>
-    </form>
+    <div className="login-container">
+      <div className="login-box">
+        <Form
+          name="basic"
+          labelCol={{ span: 24 }}
+          wrapperCol={{ span: 24 }}
+          initialValues={{ remember: true }}
+          onFinish={onFinish}
+          autoComplete="off"
+          size="large"
+        >
+          <Form.Item
+            label="Username"
+            name="username"
+            rules={[{ required: true, message: "Please input your username!" }]}
+          >
+            <Input
+              prefix={<UserOutlined className="site-form-item-icon" />}
+              placeholder="Username"
+            />
+          </Form.Item>
+
+          <Form.Item
+            label="Password"
+            name="password"
+            rules={[{ required: true, message: "Please input your password!" }]}
+          >
+            <Input.Password
+              prefix={<LockOutlined className="site-form-item-icon" />}
+              type="password"
+              placeholder="Password"
+            />
+          </Form.Item>
+
+          <Form.Item wrapperCol={{ span: 24 }}>
+            <Button type="primary" htmlType="submit" block>
+              Submit
+            </Button>
+          </Form.Item>
+        </Form>
+      </div>
+    </div>
   );
-}
+};
 
 export default Login;

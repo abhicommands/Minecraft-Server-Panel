@@ -11,12 +11,14 @@ const fileRoutes = require("./routes/fileRoutes");
 const { db, findServer } = require("./db/db");
 const fs = require("fs-extra");
 const path = require("path");
-const { v4: uuidv4, validate } = require("uuid");
+const { v4: uuidv4 } = require("uuid");
 const axios = require("axios");
 const pty = require("node-pty");
 const socket = require("socket.io");
 const http = require("http");
 const cookie = require("cookie");
+const os = require("os");
+const kill = require("tree-kill");
 
 const app = express();
 app.use(express.json());
@@ -38,15 +40,21 @@ const io = socket(server, {
     credentials: true, // Important for sending cookies and headers
   },
 });
+
+const MAX_LOG_SIZE = 1024 * 1024;
 let terminals = {};
 
 const createTerminal = (logDir, startupCommand) => {
-  const shell = "bash";
+  const isWindows = process.platform === "win32";
+  const shell = isWindows ? "powershell.exe" : "bash";
   const pathOfRoot = path.join(logDir, "../root");
   const ptyProcess = pty.spawn(shell, [], {
     name: "xterm-color",
     cwd: pathOfRoot,
-    env: process.env,
+    env: {
+      ...process.env,
+      BASH_SILENCE_DEPRECATION_WARNING: "1",
+    },
   });
   fs.ensureDirSync(logDir);
   let serverPID = null;
@@ -54,14 +62,21 @@ const createTerminal = (logDir, startupCommand) => {
   return { ptyProcess, isServerRunning, startupCommand, serverPID };
 };
 const initializeTerminal = (serverId, terminalPty, logDir) => {
-  const logFile = fs.createWriteStream(path.join(logDir, "server.log"), {
-    flags: "a",
-  });
+  const logFilePath = path.join(logDir, "server.log");
+  fs.ensureFileSync(logFilePath);
   fs.removeSync(path.join(logDir, "../minecraft_pid.txt"));
+  const truncateLogFile = (filePath) => {
+    const data = fs.readFileSync(filePath, "utf8");
+    if (data.length > MAX_LOG_SIZE) {
+      const truncatedData = data.slice(data.length - MAX_LOG_SIZE);
+      fs.writeFileSync(filePath, truncatedData, "utf8");
+    }
+  };
   terminalPty.ptyProcess.on("data", function (rawOutput) {
     if (io.sockets.adapter.rooms.get(serverId))
       io.to(serverId).emit("output", rawOutput);
-    logFile.write(rawOutput);
+    fs.appendFileSync(logFilePath, rawOutput);
+    truncateLogFile(logFilePath);
     if (fs.existsSync(path.join(logDir, "../minecraft_pid.txt")))
       terminalPty.serverPID = parseInt(
         fs.readFileSync(path.join(logDir, "../minecraft_pid.txt"), "utf8")
@@ -85,6 +100,38 @@ const initializeTerminal = (serverId, terminalPty, logDir) => {
   });
 };
 
+const downloadFile = async (url, dest) => {
+  const response = await axios({
+    method: "get",
+    url,
+    responseType: "stream",
+  });
+
+  const writer = fs.createWriteStream(dest);
+  response.data.pipe(writer);
+
+  return new Promise((resolve, reject) => {
+    writer.on("finish", () => {
+      writer.close(resolve);
+    });
+    writer.on("error", (err) => {
+      writer.close(() => reject(err));
+    });
+  });
+};
+const downloadServerJar = async (version, serverRoot) => {
+  const fabricUrl = `https://meta.fabricmc.net/v2/versions/loader/${version}/stable/stable/server/jar`;
+  const jarPath = path.join(serverRoot, "server.jar");
+  await downloadFile(fabricUrl, jarPath);
+};
+const downloadMsh = async (serverRoot) => {
+  const mshUrl =
+    "https://msh.gekware.net/builds/darwin/arm64/msh-v2.5.0-350c73e-darwin-arm64.osx";
+  const mshPath = path.join(serverRoot, "msh_server.osx");
+  await downloadFile(mshUrl, mshPath);
+  // Mark the msh file as executable
+  fs.chmodSync(mshPath, 0o755);
+};
 const SERVERS_BASE_PATH = path.join(__dirname, "server-directory");
 //create new server
 app.post("/servers", authenticate, async (req, res) => {
@@ -98,8 +145,20 @@ app.post("/servers", authenticate, async (req, res) => {
   fs.ensureDirSync(path.join(serverPath, "logs")); //create a logs directory
   // Extracting request data with default values
   const name = req.body.name || "Minecraft Server";
-  const startupCommand = `java -Xmx${req.body.memory}G -jar server.jar nogui`;
+  //validate the memory
+  if (!req.body.memory) {
+    res.status(400).send("Memory is required");
+    return;
+  }
+  if (
+    req.body.memory < 1 ||
+    req.body.memory > os.totalmem() / 1024 / 1024 / 1024
+  ) {
+    res.status(400).send("Invalid memory size");
+    return;
+  }
   const port = req.body.port || 25565;
+  const startupCommand = `./msh_server.osx -port ${port} -d 4 -allowkill 60 -timeout 60`;
   if (req.body.version === "latest") {
     req.body.version = "stable";
   } else if (!req.body.version) {
@@ -123,38 +182,66 @@ app.post("/servers", authenticate, async (req, res) => {
   initializeTerminal(serverId, terminalPty, logDir);
   terminals[serverId] = terminal;
   db.run(
-    "INSERT INTO servers (id, name, path, backupPath, startupCommand, version, port) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    "INSERT INTO servers (uuid, name, path, backupPath, startupCommand, version, port) VALUES (?, ?, ?, ?, ?, ?, ?)",
     [serverId, name, serverRoot, backupPath, startupCommand, version, port],
     function (err) {
       if (err) {
         res.status(500).send("Failed to create server");
         return;
       }
-      res.status(201).json({
-        id: serverId,
-        name,
-        version,
-        port,
-      });
+      res.status(201).json({ id: serverId, name, version, port }); // Return uuid instead of id
     }
   );
   try {
-    const fabricUrl = `https://meta.fabricmc.net/v2/versions/loader/${version}/stable/stable/server/jar`;
-    const response = await axios({
-      method: "get",
-      url: fabricUrl,
-      responseType: "stream",
-    });
-    const jarPath = path.join(serverRoot, "server.jar");
-    const writer = fs.createWriteStream(jarPath);
-    response.data.pipe(writer);
-    await new Promise((resolve, reject) => {
-      writer.on("finish", resolve);
-      writer.on("error", reject);
-    });
+    try {
+      await downloadServerJar(version, serverRoot);
+      await downloadMsh(serverRoot);
+    } catch (error) {
+      console.error("Error downloading files:", error);
+    }
     //write the port to the server.properties file
     const propertiesPath = path.join(serverRoot, "server.properties");
     fs.ensureFileSync(propertiesPath);
+    const mshConfPath = path.join(serverRoot, "msh-config.json");
+    fs.ensureFileSync(mshConfPath);
+    const mshStartParam = `-Xmx${req.body.memory}G -Xms${req.body.memory}G`;
+    const minecraftPort = parseInt(port, 10) + 1;
+    const mshConf = {
+      Server: {
+        Folder: "./",
+        FileName: "server.jar",
+        Version: version,
+        Protocol: 760,
+      },
+      Commands: {
+        StartServer:
+          "java <Commands.StartServerParam> -jar <Server.FileName> nogui",
+        StartServerParam: mshStartParam,
+        StopServer: "stop",
+        StopServerAllowKill: 10,
+      },
+      Msh: {
+        Debug: 1,
+        ID: "",
+        MshPort: 0,
+        MshPortQuery: 0,
+        EnableQuery: true,
+        TimeBeforeStoppingEmptyServer: 30,
+        SuspendAllow: false,
+        SuspendRefresh: -1,
+        InfoHibernation:
+          "                   §fserver status:\n                   §b§lHIBERNATING",
+        InfoStarting:
+          "                   §fserver status:\n                    §6§lWARMING UP",
+        NotifyUpdate: true,
+        NotifyMessage: true,
+        Whitelist: [],
+        WhitelistImport: false,
+        ShowResourceUsage: false,
+        ShowInternetUsage: false,
+      },
+    };
+    fs.writeFileSync(mshConfPath, JSON.stringify(mshConf, null, 2));
     const propertiesContent = `
 #Minecraft server properties
 #Thu May 16 21:56:35 EDT 2024
@@ -195,7 +282,7 @@ op-permission-level=4
 player-idle-timeout=0
 prevent-proxy-connections=false
 pvp=true
-query.port=${port}
+query.port=${minecraftPort}
 rate-limit=0
 rcon.password=
 rcon.port=25575
@@ -205,7 +292,7 @@ resource-pack-id=
 resource-pack-prompt=
 resource-pack-sha1=
 server-ip=
-server-port=${port}
+server-port=${minecraftPort}
 simulation-distance=10
 spawn-animals=true
 spawn-monsters=true
@@ -237,7 +324,7 @@ eula=true
         res.status(404).send("Server not found");
       } else {
         const serverPath = path.join(SERVERS_BASE_PATH, serverId);
-        fs.removeSync(serverPath, (err) => {
+        fs.remove(serverPath, (err) => {
           if (err) {
             console.error("Failed to delete server directory:", err);
             res.status(500).send("Failed to delete server directory");
@@ -256,7 +343,7 @@ app.get("/servers", authenticate, (req, res) => {
       res.status(500).send("Failed to retrieve servers");
     } else {
       const servers = rows.map((row) => ({
-        id: row.id,
+        id: row.uuid,
         name: row.name,
         version: row.version,
         port: row.port,
@@ -265,11 +352,51 @@ app.get("/servers", authenticate, (req, res) => {
     }
   });
 });
+//update server or change versions just deletes the server.jar file and redownloads the version specified by the user
+app.post("/servers/:id/update", authenticate, findServer, async (req, res) => {
+  const serverRoot = req.server.path;
+  if (req.body.version === "latest") {
+    req.body.version = "stable";
+  } else if (!version) {
+    res.status(400).send("Version is required");
+    return;
+  } else {
+    const response = await axios.get(
+      `https://meta.fabricmc.net/v1/versions/game/${version}`
+    );
+    if (!response.data.length) {
+      res.status(400).send("Invalid version number");
+      return;
+    }
+  }
+  const version = req.body.version;
+  const fabricUrl = `https://meta.fabricmc.net/v2/versions/loader/${version}/stable/stable/server/jar`;
+  const response = await axios({
+    method: "get",
+    url: fabricUrl,
+    responseType: "stream",
+  });
+  //change the version from the server database
+  db.run("UPDATE servers SET version = ? WHERE uuid = ?", [
+    version,
+    req.server.uuid,
+  ]);
+  const jarPath = path.join(serverRoot, "server.jar");
+  fs.removeSync(jarPath);
+  const writer = fs.createWriteStream(jarPath);
+  response.data.pipe(writer);
+  await new Promise((resolve, reject) => {
+    writer.on("finish", resolve);
+    writer.on("error", reject);
+  });
+  res.send("Server updated successfully");
+});
+
 //get server by id
 app.get("/servers/:id", authenticate, findServer, (req, res) => {
   //dont send all the information just send crucial information that the user inputted when creating the server
   res.json({
-    id: req.server.id,
+    id: req.server.uuid,
     name: req.server.name,
     version: req.server.version,
     port: req.server.port,
@@ -278,7 +405,7 @@ app.get("/servers/:id", authenticate, findServer, (req, res) => {
 //delete server
 app.delete("/servers/:id", authenticate, (req, res) => {
   const serverId = req.params.id;
-  db.run("DELETE FROM servers WHERE id = ?", serverId, function (err) {
+  db.run("DELETE FROM servers WHERE uuid = ?", serverId, function (err) {
     if (err) {
       res.status(500).send("Failed to delete server");
     } else if (this.changes === 0) {
@@ -286,9 +413,7 @@ app.delete("/servers/:id", authenticate, (req, res) => {
     } else {
       const terminal = terminals[serverId];
       if (terminal) {
-        if (terminal.isServerRunning)
-          process.kill(terminal.serverPID, "SIGKILL");
-        terminal.ptyProcess.kill();
+        kill(terminal.ptyProcess.pid, "SIGKILL");
         delete terminals[serverId];
       }
       const serverPath = path.join(SERVERS_BASE_PATH, serverId);
@@ -316,7 +441,7 @@ io.use((socket, next) => {
     }
     socket.user = user;
     db.get(
-      "SELECT path, startupCommand FROM servers WHERE id = ?",
+      "SELECT path, startupCommand FROM servers WHERE uuid = ?",
       [serverId],
       (err, row) => {
         if (err || !row) {
@@ -375,7 +500,7 @@ io.on("connection", (socket) => {
   });
   socket.on("stopServer", () => {
     if (terminal && terminal.isServerRunning) {
-      terminal.ptyProcess.write("stop\n");
+      terminal.ptyProcess.write("msh exit\n");
       fs.removeSync(
         path.join(SERVERS_BASE_PATH, socket.serverId, "./minecraft_pid.txt")
       );
@@ -388,10 +513,8 @@ io.on("connection", (socket) => {
   });
   socket.on("killServer", () => {
     if (terminal && terminal.isServerRunning) {
-      terminal.ptyProcess.kill();
-      //kill any child processes that were created during the terminals process
       if (terminal.serverPID) {
-        process.kill(terminal.serverPID);
+        kill(terminal.serverPID, "SIGKILL");
       }
       terminal.isServerRunning = false;
       io.to(socket.serverId).emit("serverStatus", false);
