@@ -2,9 +2,18 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const JWT_SECRET = process.env.JWT_SECRET;
+const Joi = require("joi");
+
+const loginSchema = Joi.object({
+  username: Joi.string().alphanum().min(3).max(30).required(),
+  password: Joi.string()
+    .pattern(new RegExp("^[a-zA-Z0-9!@#$%^&*()_+-=\\[\\]{};:'\",.<>?\\/]*$"))
+    .min(6)
+    .max(50)
+    .required(),
+});
 
 const router = express.Router();
-
 const secureStatus = process.env.SECURE_STATUS === "true" ? true : false;
 const user = {
   admin: {
@@ -12,6 +21,7 @@ const user = {
     password: process.env.ROOT_PASSWORD_HASH,
   },
 };
+
 const authenticateSocket = (token, callback) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
@@ -40,7 +50,11 @@ const authenticate = (req, res, next) => {
 };
 
 router.post("/login", async (req, res) => {
-  const { username, password } = req.body;
+  const { error, value } = loginSchema.validate(req.body);
+  if (error) {
+    return res.status(400).json({ error: error.details[0].message });
+  }
+  const { username, password } = value; // Using sanitized and validated inputs
   if (
     username === user.admin.username &&
     bcrypt.compareSync(password, user.admin.password)
@@ -49,7 +63,7 @@ router.post("/login", async (req, res) => {
     res.cookie("token", token, {
       httpOnly: true,
       secure: secureStatus,
-      sameSite: true,
+      sameSite: "strict",
       maxAge: 604800000,
     });
     res.json({ message: "Login successful" });
@@ -57,7 +71,6 @@ router.post("/login", async (req, res) => {
     res.status(401).json({ error: "Invalid username or password" });
   }
 });
-
 router.post("/logout", (req, res) => {
   res.clearCookie("token", {
     httpOnly: true,

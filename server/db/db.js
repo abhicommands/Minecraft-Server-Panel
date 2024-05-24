@@ -1,6 +1,7 @@
 const sqlite3 = require("sqlite3").verbose();
 const path = require("path");
 const fs = require("fs-extra");
+const { validate } = require("uuid");
 
 const DB_PATH = path.join(__dirname, "myServers.db");
 fs.ensureFileSync(DB_PATH);
@@ -39,6 +40,10 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
 // Middleware to find servers by UUID
 const findServer = (req, res, next) => {
   const uuid = req.params.id;
+  if (!validate(uuid)) {
+    res.status(400).send("Invalid UUID");
+    return;
+  }
   db.get("SELECT * FROM servers WHERE uuid = ?", uuid, (err, row) => {
     if (err) {
       res.status(500).send("Failed to retrieve server");

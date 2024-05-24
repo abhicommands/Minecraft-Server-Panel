@@ -39,10 +39,6 @@ const CreateMinecraftServer = () => {
       alert("Please fill all fields before submitting!");
       return;
     }
-
-    const startupCommand = `java -Xmx${memoryGB}G -jar server.jar nogui`;
-
-    // posts the data to the server using axios
     axios
       .post(
         `${API_URL}/servers`,
@@ -51,7 +47,6 @@ const CreateMinecraftServer = () => {
           memory: memoryGB,
           version: minecraftVersion,
           port: port,
-          startupCommand: startupCommand,
         },
         { withCredentials: true }
       )

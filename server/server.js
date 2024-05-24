@@ -11,7 +11,7 @@ const fileRoutes = require("./routes/fileRoutes");
 const { db, findServer } = require("./db/db");
 const fs = require("fs-extra");
 const path = require("path");
-const { v4: uuidv4 } = require("uuid");
+const { v4: uuidv4, validate } = require("uuid");
 const axios = require("axios");
 const pty = require("node-pty");
 const socket = require("socket.io");
@@ -19,6 +19,7 @@ const http = require("http");
 const cookie = require("cookie");
 const os = require("os");
 const kill = require("tree-kill");
+const Joi = require("joi");
 
 const app = express();
 app.use(express.json());
@@ -42,12 +43,42 @@ const io = socket(server, {
 });
 
 const MAX_LOG_SIZE = 1024 * 1024;
+const serverCreateSchema = Joi.object({
+  name: Joi.string().required(),
+  memory: Joi.number()
+    .integer()
+    .min(1)
+    .max(os.totalmem() / 1024 / 1024 / 1024)
+    .required(),
+  port: Joi.number().required(),
+  version: Joi.string()
+    .custom((value, helpers) => {
+      // Custom rule to transform 'latest' to 'stable'
+      if (value === "latest") {
+        return "stable";
+      }
+      return value; // Return the value unchanged if it's not 'latest'
+    })
+    .required(),
+});
+const serverUpdateSchema = Joi.object({
+  version: Joi.string()
+    .custom((value, helpers) => {
+      // Custom rule to transform 'latest' to 'stable'
+      if (value === "latest") {
+        return "stable";
+      }
+      return value; // Return the value unchanged if it's not 'latest'
+    })
+    .required(),
+});
+
 let terminals = {};
 
 const createTerminal = (logDir, startupCommand) => {
   const isWindows = process.platform === "win32";
   const shell = isWindows ? "powershell.exe" : "bash";
-  const pathOfRoot = path.join(logDir, "../root");
+  const pathOfRoot = path.join(logDir, "../");
   const ptyProcess = pty.spawn(shell, [], {
     name: "xterm-color",
     cwd: pathOfRoot,
@@ -85,8 +116,13 @@ const initializeTerminal = (serverId, terminalPty, logDir) => {
       try {
         process.kill(terminalPty.serverPID, 0);
         terminalPty.isServerRunning = true;
-        if (io.sockets.adapter.rooms.get(serverId))
-          io.to(serverId).emit("serverStatus", true);
+        if (rawOutput.includes("MINECRAFT SERVER IS ONLINE!")) {
+          if (io.sockets.adapter.rooms.get(serverId))
+            io.to(serverId).emit("serverStatus", true);
+        } else if (rawOutput.includes("MINECRAFT SERVER IS OFFLINE!")) {
+          if (io.sockets.adapter.rooms.get(serverId))
+            io.to(serverId).emit("serverStatus", false);
+        }
       } catch (error) {
         terminalPty.isServerRunning = false;
         if (io.sockets.adapter.rooms.get(serverId))
@@ -122,6 +158,7 @@ const downloadFile = async (url, dest) => {
 const downloadServerJar = async (version, serverRoot) => {
   const fabricUrl = `https://meta.fabricmc.net/v2/versions/loader/${version}/stable/stable/server/jar`;
   const jarPath = path.join(serverRoot, "server.jar");
+  if (fs.existsSync(jarPath)) fs.removeSync(jarPath);
   await downloadFile(fabricUrl, jarPath);
 };
 const downloadMsh = async (serverRoot) => {
@@ -129,12 +166,26 @@ const downloadMsh = async (serverRoot) => {
     "https://msh.gekware.net/builds/darwin/arm64/msh-v2.5.0-350c73e-darwin-arm64.osx";
   const mshPath = path.join(serverRoot, "msh_server.osx");
   await downloadFile(mshUrl, mshPath);
-  // Mark the msh file as executable
   fs.chmodSync(mshPath, 0o755);
 };
 const SERVERS_BASE_PATH = path.join(__dirname, "server-directory");
 //create new server
 app.post("/servers", authenticate, async (req, res) => {
+  const { error, value } = serverCreateSchema.validate(req.body);
+  if (error) {
+    return res.status(400).send(error.details[0].message);
+  }
+  const name = value.name;
+  const port = value.port;
+  const startupCommand = `./msh_server.osx -port ${port}`;
+  const response = await axios.get(
+    `https://meta.fabricmc.net/v1/versions/game/${value.version}`
+  );
+  if (!response.data.length) {
+    res.status(400).send("Invalid version number");
+    return;
+  }
+  const version = value.version;
   const serverId = uuidv4();
   const serverPath = path.join(SERVERS_BASE_PATH, serverId);
   const serverRoot = path.join(serverPath, "root");
@@ -142,41 +193,9 @@ app.post("/servers", authenticate, async (req, res) => {
   fs.ensureDirSync(serverPath);
   fs.ensureDirSync(serverRoot);
   fs.ensureDirSync(backupPath);
-  fs.ensureDirSync(path.join(serverPath, "logs")); //create a logs directory
-  // Extracting request data with default values
-  const name = req.body.name || "Minecraft Server";
-  //validate the memory
-  if (!req.body.memory) {
-    res.status(400).send("Memory is required");
-    return;
-  }
-  if (
-    req.body.memory < 1 ||
-    req.body.memory > os.totalmem() / 1024 / 1024 / 1024
-  ) {
-    res.status(400).send("Invalid memory size");
-    return;
-  }
-  const port = req.body.port || 25565;
-  const startupCommand = `./msh_server.osx -port ${port} -d 4 -allowkill 60 -timeout 60`;
-  if (req.body.version === "latest") {
-    req.body.version = "stable";
-  } else if (!req.body.version) {
-    res.status(400).send("Version is required");
-    return;
-  } else {
-    const response = await axios.get(
-      `https://meta.fabricmc.net/v1/versions/game/${req.body.version}`
-    );
-    if (!response.data.length) {
-      res.status(400).send("Invalid version number");
-      return;
-    }
-  }
-  const version = req.body.version;
+  fs.ensureDirSync(path.join(serverPath, "logs"));
   const logDir = path.join(serverPath, "logs");
   const terminal = createTerminal(logDir, startupCommand);
-  //create the ptyprocess.on
   terminals[serverId] = terminal;
   terminalPty = terminals[serverId];
   initializeTerminal(serverId, terminalPty, logDir);
@@ -195,20 +214,20 @@ app.post("/servers", authenticate, async (req, res) => {
   try {
     try {
       await downloadServerJar(version, serverRoot);
-      await downloadMsh(serverRoot);
+      await downloadMsh(serverPath);
     } catch (error) {
       console.error("Error downloading files:", error);
     }
     //write the port to the server.properties file
     const propertiesPath = path.join(serverRoot, "server.properties");
     fs.ensureFileSync(propertiesPath);
-    const mshConfPath = path.join(serverRoot, "msh-config.json");
+    const mshConfPath = path.join(serverPath, "msh-config.json");
     fs.ensureFileSync(mshConfPath);
-    const mshStartParam = `-Xmx${req.body.memory}G -Xms${req.body.memory}G`;
+    const mshStartParam = `-Xmx${value.memory}G -Xms${value.memory}G`;
     const minecraftPort = parseInt(port, 10) + 1;
     const mshConf = {
       Server: {
-        Folder: "./",
+        Folder: "./root/",
         FileName: "server.jar",
         Version: version,
         Protocol: 760,
@@ -218,15 +237,15 @@ app.post("/servers", authenticate, async (req, res) => {
           "java <Commands.StartServerParam> -jar <Server.FileName> nogui",
         StartServerParam: mshStartParam,
         StopServer: "stop",
-        StopServerAllowKill: 10,
+        StopServerAllowKill: 60,
       },
       Msh: {
-        Debug: 1,
+        Debug: 2,
         ID: "",
         MshPort: 0,
         MshPortQuery: 0,
         EnableQuery: true,
-        TimeBeforeStoppingEmptyServer: 30,
+        TimeBeforeStoppingEmptyServer: 1000,
         SuspendAllow: false,
         SuspendRefresh: -1,
         InfoHibernation:
@@ -354,41 +373,29 @@ app.get("/servers", authenticate, (req, res) => {
 });
 //update server or change versions just deletes the server.jar file and redownloads the version specified by the user
 app.post("/servers/:id/update", authenticate, findServer, async (req, res) => {
-  const serverRoot = req.server.path;
-  if (req.body.version === "latest") {
-    req.body.version = "stable";
-  } else if (!version) {
-    res.status(400).send("Version is required");
-    return;
-  } else {
-    const response = await axios.get(
-      `https://meta.fabricmc.net/v1/versions/game/${version}`
-    );
-    if (!response.data.length) {
-      res.status(400).send("Invalid version number");
-      return;
-    }
+  const { error, value } = serverUpdateSchema.validate(req.body);
+  if (error) {
+    return res.status(400).send(error.details[0].message);
   }
-  const version = req.body.version;
-  const fabricUrl = `https://meta.fabricmc.net/v2/versions/loader/${version}/stable/stable/server/jar`;
-  const response = await axios({
-    method: "get",
-    url: fabricUrl,
-    responseType: "stream",
-  });
+  const serverRoot = req.server.path;
+  const response = await axios.get(
+    `https://meta.fabricmc.net/v1/versions/game/${version}`
+  );
+  if (!response.data.length) {
+    res.status(400).send("Invalid version number");
+    return;
+  }
+  const version = value.version;
+  try {
+    await downloadServerJar(version, serverRoot);
+  } catch (error) {
+    console.error("Error downloading files:", error);
+  }
   //change the version from the server database
   db.run("UPDATE servers SET version = ? WHERE uuid = ?", [
     version,
     req.server.uuid,
   ]);
-  const jarPath = path.join(serverRoot, "server.jar");
-  fs.removeSync(jarPath);
-  const writer = fs.createWriteStream(jarPath);
-  response.data.pipe(writer);
-  await new Promise((resolve, reject) => {
-    writer.on("finish", resolve);
-    writer.on("error", reject);
-  });
   res.send("Server updated successfully");
 });
 
@@ -405,6 +412,10 @@ app.get("/servers/:id", authenticate, findServer, (req, res) => {
 //delete server
 app.delete("/servers/:id", authenticate, (req, res) => {
   const serverId = req.params.id;
+  if (!validate(serverId)) {
+    res.status(400).send("Invalid UUID");
+    return;
+  }
   db.run("DELETE FROM servers WHERE uuid = ?", serverId, function (err) {
     if (err) {
       res.status(500).send("Failed to delete server");
@@ -413,7 +424,8 @@ app.delete("/servers/:id", authenticate, (req, res) => {
     } else {
       const terminal = terminals[serverId];
       if (terminal) {
-        kill(terminal.ptyProcess.pid, "SIGKILL");
+        kill(terminal.serverPID, "SIGKILL");
+        terminal.ptyProcess.kill();
         delete terminals[serverId];
       }
       const serverPath = path.join(SERVERS_BASE_PATH, serverId);
@@ -435,6 +447,8 @@ io.use((socket, next) => {
   const serverId = socket.handshake.headers["server-id"] || "";
   if (!token) return next(new Error("Authentication error"));
   if (!serverId) return next(new Error("Server ID not found"));
+  if (validate(serverId) === false)
+    return next(new Error("Server ID not found"));
   authenticateSocket(token, (error, user) => {
     if (error) {
       return next(new Error("Authentication error"));
@@ -489,8 +503,13 @@ io.on("connection", (socket) => {
         path.join(SERVERS_BASE_PATH, socket.serverId, "./minecraft_pid.txt")
       );
       terminal.ptyProcess.write(
-        `${terminal.startupCommand} & echo $! > ../minecraft_pid.txt; fg\n`
+        `${terminal.startupCommand} & echo $! > ./minecraft_pid.txt; fg\n`
       );
+      setTimeout(() => {
+        terminal.ptyProcess.write("msh start\n");
+      }, 2000);
+    } else if (terminal && terminal.isServerRunning) {
+      terminal.ptyProcess.write("msh start\n");
     } else {
       socket.emit(
         "output",
