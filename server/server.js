@@ -174,10 +174,8 @@ app.post("/servers", authenticate, async (req, res) => {
   const response = await axios.get(
     `https://meta.fabricmc.net/v1/versions/game/${value.version}`
   );
-  if (!response.data.length) {
-    res.status(400).send("Invalid version number");
-    return;
-  }
+  if (!response.data.length)
+    return res.status(400).send("Invalid version number");
   const version = value.version;
   const serverId = uuidv4();
   const serverPath = path.join(SERVERS_BASE_PATH, serverId);
@@ -201,11 +199,11 @@ app.post("/servers", authenticate, async (req, res) => {
       fs.remove(serverPath, (err) => {
         if (err) {
           console.error("Failed to delete server directory:", err);
-          res.status(500).send("Failed to delete server directory");
+          return res.status(500).send("Failed to delete server directory");
         }
       });
       console.error("Error downloading files:", error);
-      return;
+      return res.status(500).send("Failed to download server files");
     }
     //write the port to the server.properties file
     const propertiesPath = path.join(serverRoot, "server.properties");
@@ -327,27 +325,31 @@ eula=true
       [serverId, name, serverRoot, backupPath, startupCommand, version, port],
       function (err) {
         if (err) {
-          res.status(500).send("Failed to create server");
           fs.remove(serverPath, (err) => {
             if (err) {
               console.error("Failed to delete server directory:", err);
-              res.status(500).send("Failed to delete server directory");
+              return res.status(500).send("Failed to delete server directory");
             }
           });
-          return;
+          return res.status(500).send("Failed to create server");
         }
-        res.status(201).json({ id: serverId, name, version, port }); // Return uuid instead of id
+        return res.json({
+          id: serverId,
+          name,
+          version,
+          port,
+        });
       }
     );
   } catch (error) {
     console.error("Failed to download or create the server:", error);
-    res.status(500).send("Server setup failed");
     fs.remove(serverPath, (err) => {
       if (err) {
         console.error("Failed to delete server directory:", err);
-        res.status(500).send("Failed to delete server directory");
+        return res.status(500).send("Failed to delete server directory");
       }
     });
+    return res.status(500).send("Failed to create server");
   }
 });
 //get server list
