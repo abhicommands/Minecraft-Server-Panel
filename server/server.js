@@ -93,21 +93,14 @@ const createTerminal = (logDir, startupCommand) => {
   return { ptyProcess, isServerRunning, startupCommand, serverPID };
 };
 const initializeTerminal = (serverId, terminalPty, logDir) => {
-  const logFilePath = path.join(logDir, "server.log");
-  fs.ensureFileSync(logFilePath);
+  const logFile = fs.createWriteStream(path.join(logDir, "server.log"), {
+    flags: "a",
+  });
   fs.removeSync(path.join(logDir, "../minecraft_pid.txt"));
-  const truncateLogFile = (filePath) => {
-    const data = fs.readFileSync(filePath, "utf8");
-    if (data.length > MAX_LOG_SIZE) {
-      const truncatedData = data.slice(data.length - MAX_LOG_SIZE);
-      fs.writeFileSync(filePath, truncatedData, "utf8");
-    }
-  };
   terminalPty.ptyProcess.on("data", function (rawOutput) {
     if (io.sockets.adapter.rooms.get(serverId))
       io.to(serverId).emit("output", rawOutput);
-    fs.appendFileSync(logFilePath, rawOutput);
-    truncateLogFile(logFilePath);
+    logFile.write(rawOutput);
     if (fs.existsSync(path.join(logDir, "../minecraft_pid.txt")))
       terminalPty.serverPID = parseInt(
         fs.readFileSync(path.join(logDir, "../minecraft_pid.txt"), "utf8")
@@ -200,23 +193,19 @@ app.post("/servers", authenticate, async (req, res) => {
   terminalPty = terminals[serverId];
   initializeTerminal(serverId, terminalPty, logDir);
   terminals[serverId] = terminal;
-  db.run(
-    "INSERT INTO servers (uuid, name, path, backupPath, startupCommand, version, port) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    [serverId, name, serverRoot, backupPath, startupCommand, version, port],
-    function (err) {
-      if (err) {
-        res.status(500).send("Failed to create server");
-        return;
-      }
-      res.status(201).json({ id: serverId, name, version, port }); // Return uuid instead of id
-    }
-  );
   try {
     try {
       await downloadServerJar(version, serverRoot);
       await downloadMsh(serverPath);
     } catch (error) {
+      fs.remove(serverPath, (err) => {
+        if (err) {
+          console.error("Failed to delete server directory:", err);
+          res.status(500).send("Failed to delete server directory");
+        }
+      });
       console.error("Error downloading files:", error);
+      return;
     }
     //write the port to the server.properties file
     const propertiesPath = path.join(serverRoot, "server.properties");
@@ -333,24 +322,30 @@ white-list=false
 eula=true
 `;
     fs.writeFileSync(eulaPath, eulaContent);
+    db.run(
+      "INSERT INTO servers (uuid, name, path, backupPath, startupCommand, version, port) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [serverId, name, serverRoot, backupPath, startupCommand, version, port],
+      function (err) {
+        if (err) {
+          res.status(500).send("Failed to create server");
+          fs.remove(serverPath, (err) => {
+            if (err) {
+              console.error("Failed to delete server directory:", err);
+              res.status(500).send("Failed to delete server directory");
+            }
+          });
+          return;
+        }
+        res.status(201).json({ id: serverId, name, version, port }); // Return uuid instead of id
+      }
+    );
   } catch (error) {
     console.error("Failed to download or create the server:", error);
     res.status(500).send("Server setup failed");
-    db.run("DELETE FROM servers WHERE id = ?", serverId, function (err) {
+    fs.remove(serverPath, (err) => {
       if (err) {
-        res.status(500).send("Failed to delete server");
-      } else if (this.changes === 0) {
-        res.status(404).send("Server not found");
-      } else {
-        const serverPath = path.join(SERVERS_BASE_PATH, serverId);
-        fs.remove(serverPath, (err) => {
-          if (err) {
-            console.error("Failed to delete server directory:", err);
-            res.status(500).send("Failed to delete server directory");
-          } else {
-            res.send("Server deleted successfully");
-          }
-        });
+        console.error("Failed to delete server directory:", err);
+        res.status(500).send("Failed to delete server directory");
       }
     });
   }
@@ -419,26 +414,25 @@ app.delete("/servers/:id", authenticate, (req, res) => {
   db.run("DELETE FROM servers WHERE uuid = ?", serverId, function (err) {
     if (err) {
       res.status(500).send("Failed to delete server");
-    } else if (this.changes === 0) {
-      res.status(404).send("Server not found");
-    } else {
-      const terminal = terminals[serverId];
-      if (terminal) {
-        kill(terminal.serverPID, "SIGKILL");
-        terminal.ptyProcess.kill();
-        delete terminals[serverId];
-      }
-      const serverPath = path.join(SERVERS_BASE_PATH, serverId);
-      fs.remove(serverPath, (err) => {
-        if (err) {
-          console.error("Failed to delete server directory:", err);
-          res.status(500).send("Failed to delete server directory");
-        } else {
-          res.send("Server deleted successfully");
-        }
-      });
+      return;
     }
   });
+  const terminal = terminals[serverId];
+  if (terminal) {
+    if (terminal.serverPID) kill(terminal.serverPID, "SIGKILL");
+    terminal.ptyProcess.kill();
+    delete terminals[serverId];
+  }
+  const serverPath = path.join(SERVERS_BASE_PATH, serverId);
+  if (fs.existsSync(serverPath)) {
+    fs.remove(serverPath, (err) => {
+      if (err) {
+        console.error("Failed to delete server directory:", err);
+        res.status(500).send("Failed to delete server directory");
+      }
+    });
+    res.status(204).send("Server deleted successfully");
+  }
 });
 //authenticate io
 io.use((socket, next) => {
