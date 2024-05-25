@@ -43,6 +43,7 @@ The username hash can be generated using the following command:
 const bcrypt = require("bcryptjs");
 
 ```plaintext
+const bcrypt = require("bcryptjs");
 async function generateHash() {
   const password = "sample_password"; // Replace with your actual password
   const saltRounds = 10; //used in my backend
