@@ -9,6 +9,7 @@ import {
 import FileManager from "./FileManager";
 import ServerConsole from "./ServerConsole";
 import ServerBackup from "./ServerBackup";
+import EditFile from "./EditFile";
 import axios from "axios";
 
 function ServerDetails() {
@@ -100,6 +101,7 @@ function ServerDetails() {
           <button onClick={updateServerVersion}>Update Version</button>
           <Routes>
             <Route path="files" element={<FileManager />} />
+            <Route path="files/edit/:encodedPath" element={<EditFile />} />
             <Route path="backup" element={<ServerBackup />} />
             <Route path="/" element={<ServerConsole />} />
             <Route path="*" element={<h1>Not Found</h1>} />

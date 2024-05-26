@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useDropzone } from "react-dropzone";
 import EditFile from "./EditFile"; // Assuming you create a new component for editing files
@@ -12,6 +12,7 @@ function FileManager() {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [editingFile, setEditingFile] = useState(null);
   const [destinationPath, setDestinationPath] = useState("");
+  const navigate = useNavigate();
   const API_URL = process.env.REACT_APP_API_URL;
 
   const fetchFiles = async () => {
@@ -159,16 +160,9 @@ function FileManager() {
     return editableExtensions.some((ext) => fileName.endsWith(ext));
   };
 
-  const openFileEditor = async (filePath) => {
-    try {
-      const response = await axios.get(`${API_URL}/servers/${id}/files/read`, {
-        params: { filePath },
-        withCredentials: true,
-      });
-      setEditingFile({ path: filePath, content: response.data });
-    } catch (error) {
-      console.error("Error reading file:", error);
-    }
+  const openFileEditor = (filePath) => {
+    const encodedPath = encodeURIComponent(filePath);
+    navigate(`/server/${id}/files/edit/${encodedPath}`);
   };
 
   const renderBreadcrumbs = () => {

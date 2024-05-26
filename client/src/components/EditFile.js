@@ -1,22 +1,45 @@
-import React, { useState } from "react";
-import { useParams } from "react-router-dom";
+// src/components/EditFile.js
+import React, { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 
-function EditFile({ file, onClose }) {
-  const { id } = useParams();
-  const [content, setContent] = useState(file.content);
+function EditFile() {
+  const { id, encodedPath } = useParams();
+  const [content, setContent] = useState("");
+  const [fileName, setFileName] = useState("");
+  const navigate = useNavigate();
   const API_URL = process.env.REACT_APP_API_URL;
+
+  useEffect(() => {
+    const filePath = decodeURIComponent(encodedPath);
+    const fetchFileContent = async () => {
+      try {
+        const response = await axios.get(
+          `${API_URL}/servers/${id}/files/read`,
+          {
+            params: { filePath },
+            withCredentials: true,
+          }
+        );
+        setContent(response.data);
+        setFileName(filePath);
+      } catch (error) {
+        console.error("Error reading file:", error);
+      }
+    };
+    fetchFileContent();
+  }, [id, encodedPath, API_URL]);
 
   const saveFile = async () => {
     try {
       await axios.post(
         `${API_URL}/servers/${id}/files/save`,
-        { path: file.path, content },
+        { path: fileName, content },
         {
           withCredentials: true,
         }
       );
-      onClose();
+      navigate(-1); // Go back to the previous page
     } catch (error) {
       console.error("Error saving file:", error);
     }
@@ -24,14 +47,14 @@ function EditFile({ file, onClose }) {
 
   return (
     <div style={{ padding: "20px", border: "1px solid gray" }}>
-      <h3>Editing {file.path}</h3>
+      <h3>Editing {fileName}</h3>
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
         style={{ width: "100%", height: "300px" }}
       />
       <button onClick={saveFile}>Save</button>
-      <button onClick={onClose}>Close</button>
+      <button onClick={() => navigate(-1)}>Close</button>
     </div>
   );
 }
