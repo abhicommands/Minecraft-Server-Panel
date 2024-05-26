@@ -15,8 +15,9 @@ const Login = ({ onLoginSuccess }) => {
         { username, password },
         { withCredentials: true }
       );
-      onLoginSuccess();
+      onLoginSuccess(true);
     } catch (error) {
+      onLoginSuccess(false);
       alert("Login failed: " + error.message);
     }
   };
