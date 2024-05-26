@@ -50,26 +50,10 @@ const serverCreateSchema = Joi.object({
     .max(os.totalmem() / 1024 / 1024 / 1024)
     .required(),
   port: Joi.number().required(),
-  version: Joi.string()
-    .custom((value, helpers) => {
-      // Custom rule to transform 'latest' to 'stable'
-      if (value === "latest") {
-        return "stable";
-      }
-      return value; // Return the value unchanged if it's not 'latest'
-    })
-    .required(),
+  version: Joi.string().required(),
 });
 const serverUpdateSchema = Joi.object({
-  version: Joi.string()
-    .custom((value, helpers) => {
-      // Custom rule to transform 'latest' to 'stable'
-      if (value === "latest") {
-        return "stable";
-      }
-      return value; // Return the value unchanged if it's not 'latest'
-    })
-    .required(),
+  version: Joi.string().required(),
 });
 
 let terminals = {};
@@ -163,19 +147,23 @@ const downloadMsh = async (serverRoot) => {
 const SERVERS_BASE_PATH = path.join(__dirname, "server-directory");
 //create new server
 app.post("/servers", authenticate, async (req, res) => {
-  const { error, value } = serverCreateSchema.validate(req.body);
+  let { error, value } = serverCreateSchema.validate(req.body);
   if (error) {
     return res.status(400).send(error.details[0].message);
   }
   const name = value.name;
   const port = value.port;
-  const startupCommand = `./msh_server.osx -port ${port}`;
-  const response = await axios.get(
-    `https://meta.fabricmc.net/v1/versions/game/${value.version}`
-  );
-  if (!response.data.length)
-    return res.status(400).send("Invalid version number");
+  if (value.version !== "latest") {
+    const response = await axios.get(
+      `https://meta.fabricmc.net/v1/versions/game/${value.version}`
+    );
+    if (!response.data.length)
+      return res.status(400).send("Invalid version number");
+  } else {
+    value.version = "stable";
+  }
   const version = value.version;
+  const startupCommand = `./msh_server.osx -port ${port} -version ${version}`;
   const serverId = uuidv4();
   const serverPath = path.join(SERVERS_BASE_PATH, serverId);
   const serverRoot = path.join(serverPath, "root");
@@ -212,7 +200,6 @@ app.post("/servers", authenticate, async (req, res) => {
   terminals[serverId] = terminal;
   terminalPty = terminals[serverId];
   initializeTerminal(serverId, terminalPty, logDir);
-  terminals[serverId] = terminal;
   try {
     try {
       await downloadServerJar(version, serverRoot);
@@ -230,6 +217,8 @@ app.post("/servers", authenticate, async (req, res) => {
           return res.status(500).send("Failed to delete server from database");
         }
       });
+      terminalPty.ptyProcess.kill();
+      delete terminals[serverId];
       console.error("Error downloading files:", error);
       return res.status(500).send("Failed to download server files");
     }
@@ -368,6 +357,8 @@ eula=true
         return res.status(500).send("Failed to delete server from database");
       }
     });
+    terminalPty.ptyProcess.kill();
+    delete terminals[serverId];
     return res.status(500).send("Failed to create server");
   }
 });
@@ -389,17 +380,21 @@ app.get("/servers", authenticate, (req, res) => {
 });
 //update server or change versions just deletes the server.jar file and redownloads the version specified by the user
 app.post("/servers/:id/update", authenticate, findServer, async (req, res) => {
-  const { error, value } = serverUpdateSchema.validate(req.body);
+  let { error, value } = serverUpdateSchema.validate(req.body);
   if (error) {
     return res.status(400).send(error.details[0].message);
   }
   const serverRoot = req.server.path;
-  const response = await axios.get(
-    `https://meta.fabricmc.net/v1/versions/game/${version}`
-  );
-  if (!response.data.length) {
-    res.status(400).send("Invalid version number");
-    return;
+  if (value.version !== "latest") {
+    const response = await axios.get(
+      `https://meta.fabricmc.net/v1/versions/game/${value.version}`
+    );
+    if (!response.data.length) {
+      res.status(400).send("Invalid version number");
+      return;
+    }
+  } else {
+    value.version = "stable";
   }
   const version = value.version;
   try {
@@ -408,10 +403,14 @@ app.post("/servers/:id/update", authenticate, findServer, async (req, res) => {
     console.error("Error downloading files:", error);
   }
   //change the version from the server database
-  db.run("UPDATE servers SET version = ? WHERE uuid = ?", [
+  db.run("UPDATE servers SET version = ?, startupCommand = ? WHERE uuid = ?", [
     version,
+    `./msh_server.osx -port ${req.server.port} -version ${version}`,
     req.server.uuid,
   ]);
+  //change startupcommand of the terminal
+  const terminal = terminals[req.server.uuid];
+  terminal.startupCommand = `./msh_server.osx -port ${req.server.port} -version ${version}`;
   res.send("Server updated successfully");
 });
 
