@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
-import "./CreateServer.css";
 
 const CreateMinecraftServer = () => {
   const [serverName, setServerName] = useState("");

@@ -1,14 +1,45 @@
-import React from "react";
-import { Form, Input, Button } from "antd";
-import { LockOutlined, UserOutlined } from "@ant-design/icons";
+import React, { useState } from "react";
+import {
+  Button,
+  TextField,
+  Box,
+  Container,
+  Typography,
+  IconButton,
+  InputAdornment,
+} from "@mui/material";
+import { styled } from "@mui/system";
 import axios from "axios";
-import "./Login.css";
+import { Visibility, VisibilityOff } from "@mui/icons-material";
+
+const LoginContainer = styled(Container)`
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100vh;
+`;
+
+const LoginBox = styled(Box)`
+  padding: 2rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+`;
 
 const Login = ({ onLoginSuccess }) => {
+  const [showPassword, setShowPassword] = useState(false);
   const API_URL = process.env.REACT_APP_API_URL;
 
-  const onFinish = async (values) => {
-    const { username, password } = values;
+  const handleTogglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
+
+  const onFinish = async (event) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const username = data.get("username");
+    const password = data.get("password");
+
     try {
       await axios.post(
         `${API_URL}/login`,
@@ -23,48 +54,48 @@ const Login = ({ onLoginSuccess }) => {
   };
 
   return (
-    <div className="login-container">
-      <div className="login-box">
-        <Form
-          name="basic"
-          labelCol={{ span: 24 }}
-          wrapperCol={{ span: 24 }}
-          initialValues={{ remember: true }}
-          onFinish={onFinish}
-          autoComplete="off"
-          size="large"
-        >
-          <Form.Item
+    <LoginContainer maxWidth="sm">
+      <LoginBox>
+        <Typography variant="h5" gutterBottom>
+          Login
+        </Typography>
+        <Box component="form" onSubmit={onFinish} noValidate>
+          <TextField
             label="Username"
             name="username"
-            rules={[{ required: true, message: "Please input your username!" }]}
-          >
-            <Input
-              prefix={<UserOutlined className="site-form-item-icon" />}
-              placeholder="Username"
-            />
-          </Form.Item>
-
-          <Form.Item
+            variant="outlined"
+            fullWidth
+            required
+            margin="normal"
+          />
+          <TextField
             label="Password"
             name="password"
-            rules={[{ required: true, message: "Please input your password!" }]}
-          >
-            <Input.Password
-              prefix={<LockOutlined className="site-form-item-icon" />}
-              type="password"
-              placeholder="Password"
-            />
-          </Form.Item>
-
-          <Form.Item wrapperCol={{ span: 24 }}>
-            <Button type="primary" htmlType="submit" block>
-              Submit
-            </Button>
-          </Form.Item>
-        </Form>
-      </div>
-    </div>
+            type={showPassword ? "text" : "password"}
+            variant="outlined"
+            fullWidth
+            required
+            margin="normal"
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    aria-label="toggle password visibility"
+                    onClick={handleTogglePasswordVisibility}
+                    edge="end"
+                  >
+                    {showPassword ? <VisibilityOff /> : <Visibility />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+          />
+          <Button type="submit" variant="contained" color="primary" fullWidth>
+            Submit
+          </Button>
+        </Box>
+      </LoginBox>
+    </LoginContainer>
   );
 };
 

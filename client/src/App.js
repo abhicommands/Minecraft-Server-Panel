@@ -1,12 +1,18 @@
-// src/App.js
 import React, { useState, useEffect } from "react";
 import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
 import axios from "axios";
 import Home from "./components/Home";
 import ServerDetails from "./components/ServerDetails";
 import CreateServer from "./components/CreateServer";
-import Layout from "./components/Layout";
+import AppLayout from "./components/Layout";
 import Login from "./components/Login";
+import { ThemeProvider, createTheme } from "@mui/material/styles";
+
+const theme = createTheme({
+  palette: {
+    mode: "dark",
+  },
+});
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -22,6 +28,7 @@ function App() {
       setIsAuthenticated(false);
     }
   };
+
   useEffect(() => {
     fetchUserData();
   }, []);
@@ -34,24 +41,31 @@ function App() {
       console.error("Logout failed:", error);
     }
   };
+
   const setLoginStatus = (status) => {
     setIsAuthenticated(status);
   };
+
   return (
-    <Router>
-      {isAuthenticated ? (
-        <Layout isAuthenticated={isAuthenticated} handleLogout={handleLogout}>
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/server/:id/*" element={<ServerDetails />} />
-            <Route path="/create-server" element={<CreateServer />} />
-            <Route path="*" element={<h1>Page Doesn't exist</h1>} />
-          </Routes>
-        </Layout>
-      ) : (
-        <Login onLoginSuccess={setLoginStatus} />
-      )}
-    </Router>
+    <ThemeProvider theme={theme}>
+      <Router>
+        {isAuthenticated ? (
+          <AppLayout
+            isAuthenticated={isAuthenticated}
+            handleLogout={handleLogout}
+          >
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/server/:id/*" element={<ServerDetails />} />
+              <Route path="/create-server" element={<CreateServer />} />
+              <Route path="*" element={<h1>Page Doesn't exist</h1>} />
+            </Routes>
+          </AppLayout>
+        ) : (
+          <Login onLoginSuccess={setLoginStatus} />
+        )}
+      </Router>
+    </ThemeProvider>
   );
 }
 

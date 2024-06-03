@@ -12,21 +12,25 @@ const router = express.Router();
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     const serverId = req.params.id;
-    db.get("SELECT * FROM servers WHERE id = ?", [serverId], (err, server) => {
-      if (err) {
-        return cb(new Error("Server lookup failed"));
+    db.get(
+      "SELECT * FROM servers WHERE uuid = ?",
+      [serverId],
+      (err, server) => {
+        if (err) {
+          return cb(new Error("Server lookup failed"));
+        }
+        if (!server) {
+          return cb(new Error("Server not found"));
+        }
+        let uploadPath = path.join(server.path, req.query.path || "");
+        uploadPath = path.normalize(uploadPath);
+        if (!uploadPath.startsWith(server.path)) {
+          return cb(new Error("Invalid path"));
+        }
+        fs.ensureDirSync(uploadPath);
+        cb(null, uploadPath);
       }
-      if (!server) {
-        return cb(new Error("Server not found"));
-      }
-      let uploadPath = path.join(server.path, req.query.path || "");
-      uploadPath = path.normalize(uploadPath);
-      if (!uploadPath.startsWith(server.path)) {
-        return cb(new Error("Invalid path"));
-      }
-      fs.ensureDirSync(uploadPath);
-      cb(null, uploadPath);
-    });
+    );
   },
   filename: function (req, file, cb) {
     cb(null, file.originalname);
@@ -151,10 +155,8 @@ router.get("/servers/:id/unarchive", authenticate, findServer, (req, res) => {
   if (!normalizedPath.startsWith(req.server.path)) {
     return res.status(400).send("Invalid path");
   }
-  const extractPath = path.join(
-    req.server.path,
-    path.basename(normalizedPath, ".zip")
-  );
+  const zipName = path.basename(normalizedPath, path.extname(normalizedPath));
+  const extractPath = path.join(path.dirname(normalizedPath), zipName);
   fs.ensureDirSync(extractPath);
   fs.createReadStream(normalizedPath)
     .pipe(require("unzipper").Extract({ path: extractPath }))
