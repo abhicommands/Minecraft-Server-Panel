@@ -51,6 +51,11 @@ const serverCreateSchema = Joi.object({
     .required(),
   port: Joi.number().required(),
   version: Joi.string().required(),
+  serverType: Joi.string()
+    .valid("vanilla", "paper", "fabric", "forge", "bungeecord")
+    .required(),
+  mshConfig: Joi.boolean().required(),
+  renderDistance: Joi.number().integer().min(2).max(32).required(),
 });
 const serverUpdateSchema = Joi.object({
   version: Joi.string().required(),
@@ -138,9 +143,28 @@ const downloadServerJar = async (version, serverRoot) => {
   await downloadFile(fabricUrl, jarPath);
 };
 const downloadMsh = async (serverRoot) => {
-  const mshUrl =
-    "https://msh.gekware.net/builds/darwin/arm64/msh-v2.5.0-350c73e-darwin-arm64.osx";
-  const mshPath = path.join(serverRoot, "msh_server.osx");
+  const isWindows = process.platform === "win32";
+  const isLinux = process.platform === "linux";
+  const isArm = process.arch === "arm64";
+  const isX64 = process.arch === "x64";
+
+  const mshUrl = isWindows
+    ? `https://msh.gekware.net/builds/windows/${
+        isX64 ? "amd64" : "arm64"
+      }/msh-v2.5.0-350c73e-windows-${isX64 ? "amd64" : "arm64"}.exe`
+    : isLinux
+    ? `https://msh.gekware.net/builds/linux/${
+        isX64 ? "amd64" : "arm64"
+      }/msh-v2.5.0-350c73e-linux-${isX64 ? "amd64" : "arm64"}.bin`
+    : `https://msh.gekware.net/builds/darwin/${
+        isArm ? "arm64" : "x64"
+      }/msh-v2.5.0-350c73e-darwin-${isArm ? "arm64" : "x64"}.osx`;
+
+  const mshPath = path.join(
+    serverRoot,
+    isWindows ? "msh_server.exe" : isLinux ? "msh_server.bin" : "msh_server.osx"
+  );
+
   await downloadFile(mshUrl, mshPath);
   fs.chmodSync(mshPath, 0o755);
 };
