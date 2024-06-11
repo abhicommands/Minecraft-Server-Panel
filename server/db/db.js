@@ -21,7 +21,9 @@ const db = new sqlite3.Database(DB_PATH, (err) => {
           backupPath TEXT,
           startupCommand TEXT,
           version TEXT,
-          port INTEGER UNIQUE
+          port INTEGER UNIQUE,
+          serverType TEXT,
+          mshConfig BOOLEAN
         );`,
         (err) => {
           if (err) console.error("Error creating table", err.message);

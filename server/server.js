@@ -63,10 +63,12 @@ const serverUpdateSchema = Joi.object({
 
 let terminals = {};
 
-const createTerminal = (logDir, startupCommand) => {
+const createTerminal = (logDir, startupCommand, isMsh) => {
   const isWindows = process.platform === "win32";
   const shell = isWindows ? "powershell.exe" : "bash";
-  const pathOfRoot = path.join(logDir, "../");
+  const pathOfRoot = isMsh
+    ? path.join(logDir, "../")
+    : path.join(logDir, "../root/");
   const ptyProcess = pty.spawn(shell, [], {
     name: "xterm-color",
     cwd: pathOfRoot,
@@ -78,7 +80,7 @@ const createTerminal = (logDir, startupCommand) => {
   fs.ensureDirSync(logDir);
   let serverPID = null;
   let isServerRunning = false; // Ensure the log directory exists
-  return { ptyProcess, isServerRunning, startupCommand, serverPID };
+  return { ptyProcess, isServerRunning, startupCommand, serverPID, isMsh };
 };
 const initializeTerminal = (serverId, terminalPty, logDir) => {
   const logFile = fs.createWriteStream(path.join(logDir, "server.log"), {
@@ -97,12 +99,17 @@ const initializeTerminal = (serverId, terminalPty, logDir) => {
       try {
         process.kill(terminalPty.serverPID, 0);
         terminalPty.isServerRunning = true;
-        if (rawOutput.includes("MINECRAFT SERVER IS ONLINE!")) {
+        if (terminalPty.isMsh) {
+          if (rawOutput.includes("MINECRAFT SERVER IS ONLINE!")) {
+            if (io.sockets.adapter.rooms.get(serverId))
+              io.to(serverId).emit("serverStatus", true);
+          } else if (rawOutput.includes("MINECRAFT SERVER IS OFFLINE!")) {
+            if (io.sockets.adapter.rooms.get(serverId))
+              io.to(serverId).emit("serverStatus", false);
+          }
+        } else {
           if (io.sockets.adapter.rooms.get(serverId))
             io.to(serverId).emit("serverStatus", true);
-        } else if (rawOutput.includes("MINECRAFT SERVER IS OFFLINE!")) {
-          if (io.sockets.adapter.rooms.get(serverId))
-            io.to(serverId).emit("serverStatus", false);
         }
       } catch (error) {
         terminalPty.isServerRunning = false;
@@ -123,7 +130,7 @@ const downloadFile = async (url, dest) => {
     url,
     responseType: "stream",
   });
-
+  fs.ensureFileSync(dest);
   const writer = fs.createWriteStream(dest);
   response.data.pipe(writer);
 
@@ -149,48 +156,57 @@ const downloadMsh = async (serverRoot) => {
   const isX64 = process.arch === "x64";
 
   const mshUrl = isWindows
-    ? `https://msh.gekware.net/builds/windows/${
-        isX64 ? "amd64" : "arm64"
-      }/msh-v2.5.0-350c73e-windows-${isX64 ? "amd64" : "arm64"}.exe`
+    ? "https://msh.gekware.net/builds/egg/msh-windows-amd64.exe"
+    : isLinux && isX64
+    ? "https://msh.gekware.net/builds/egg/msh-linux-amd64.bin"
+    : isLinux && isArm
+    ? "https://msh.gekware.net/builds/egg/msh-linux-arm64.bin"
     : isLinux
-    ? `https://msh.gekware.net/builds/linux/${
-        isX64 ? "amd64" : "arm64"
-      }/msh-v2.5.0-350c73e-linux-${isX64 ? "amd64" : "arm64"}.bin`
-    : `https://msh.gekware.net/builds/darwin/${
-        isArm ? "arm64" : "x64"
-      }/msh-v2.5.0-350c73e-darwin-${isArm ? "arm64" : "x64"}.osx`;
-
-  const mshPath = path.join(
-    serverRoot,
-    isWindows ? "msh_server.exe" : isLinux ? "msh_server.bin" : "msh_server.osx"
-  );
+    ? "https://msh.gekware.net/builds/egg/msh-linux-arm.bin"
+    : isArm
+    ? "https://msh.gekware.net/builds/egg/msh-darwin-arm64.osx"
+    : "https://msh.gekware.net/builds/egg/msh-darwin-amd64.osx";
+  console.log(mshUrl);
+  // const mshPath = path.join(
+  //   serverRoot,
+  //   isWindows ? "msh_server.exe" : isLinux ? "msh_server.bin" : "msh_server.osx"
+  // );
+  const mshPath = path.join(serverRoot, "msh_server.osx");
+  console.log(mshPath);
+  const startupCommand = isWindows
+    ? `./msh_server.exe`
+    : isLinux
+    ? `./msh_server.bin`
+    : `./msh_server.osx`;
 
   await downloadFile(mshUrl, mshPath);
   fs.chmodSync(mshPath, 0o755);
+  return startupCommand;
 };
 const SERVERS_BASE_PATH = path.join(__dirname, "server-directory");
 //create new server
 app.post("/servers", authenticate, async (req, res) => {
-  let { error, value } = serverCreateSchema.validate(req.body);
+  const { error, value } = serverCreateSchema.validate(req.body);
   if (error) {
     return res.status(400).send(error.details[0].message);
   }
   const name = value.name;
   const port = value.port;
-  if (value.version !== "latest") {
-    const response = await axios.get(
-      `https://meta.fabricmc.net/v1/versions/game/${value.version}`
-    );
-    if (!response.data.length)
-      return res.status(400).send("Invalid version number");
-  } else {
-    value.version = "stable";
-  }
   const version = value.version;
-  const startupCommand = `./msh_server.osx -port ${port} -version ${version}`;
+  const serverType = value.serverType;
   const serverId = uuidv4();
   const serverPath = path.join(SERVERS_BASE_PATH, serverId);
   const serverRoot = path.join(serverPath, "root");
+  let startupCommand;
+  if (value.mshConfig) {
+    try {
+      startupCommand = await downloadMsh(serverPath);
+    } catch (error) {
+      console.error("Error downloading files:", error);
+    }
+  } else {
+    startupCommand = `java -Xms${value.memory}G -Xmx${value.memory}G -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:+ParallelRefProcEnabled -XX:+PerfDisableSharedMem -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1HeapRegionSize=8M -XX:G1HeapWastePercent=5 -XX:G1MaxNewSizePercent=40 -XX:G1MixedGCCountTarget=4 -XX:G1MixedGCLiveThresholdPercent=90 -XX:G1NewSizePercent=30 -XX:G1RSetUpdatingPauseTimePercent=5 -XX:G1ReservePercent=20 -XX:InitiatingHeapOccupancyPercent=15 -XX:MaxGCPauseMillis=200 -XX:MaxTenuringThreshold=1 -XX:SurvivorRatio=32 -Dusing.aikars.flags=https://mcflags.emc.gs -Daikars.new.flags=true -jar server.jar nogui`;
+  }
   const backupPath = path.join(serverPath, "backup");
   fs.ensureDirSync(serverPath);
   fs.ensureDirSync(serverRoot);
@@ -200,8 +216,18 @@ app.post("/servers", authenticate, async (req, res) => {
   try {
     await new Promise((resolve, reject) => {
       db.run(
-        "INSERT INTO servers (uuid, name, path, backupPath, startupCommand, version, port) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [serverId, name, serverRoot, backupPath, startupCommand, version, port],
+        "INSERT INTO servers (uuid, name, path, backupPath, startupCommand, version, port, serverType, mshConfig) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+          serverId,
+          name,
+          serverRoot,
+          backupPath,
+          startupCommand,
+          version,
+          port,
+          serverType,
+          value.mshConfig,
+        ],
         function (err) {
           if (err) {
             reject(new Error(`Database error: ${err.message}`));
@@ -212,22 +238,18 @@ app.post("/servers", authenticate, async (req, res) => {
     });
   } catch (error) {
     fs.remove(serverPath, (err) => {
-      console.error("Failed to delete server directory:", err);
-      if (err)
+      if (err) {
+        console.error("Failed to delete server directory:", err);
         return res
           .status(500)
           .send("Failed to delete server directory from database error");
+      }
     });
     return res.status(500).send(error.message);
   }
-  const terminal = createTerminal(logDir, startupCommand);
-  terminals[serverId] = terminal;
-  terminalPty = terminals[serverId];
-  initializeTerminal(serverId, terminalPty, logDir);
   try {
     try {
       await downloadServerJar(version, serverRoot);
-      await downloadMsh(serverPath);
     } catch (error) {
       fs.remove(serverPath, (err) => {
         if (err) {
@@ -241,54 +263,61 @@ app.post("/servers", authenticate, async (req, res) => {
           return res.status(500).send("Failed to delete server from database");
         }
       });
-      terminalPty.ptyProcess.kill();
-      delete terminals[serverId];
       console.error("Error downloading files:", error);
       return res.status(500).send("Failed to download server files");
     }
+    const terminal = createTerminal(logDir, startupCommand, value.mshConfig);
+    terminals[serverId] = terminal;
+    terminalPty = terminals[serverId];
+    initializeTerminal(serverId, terminalPty, logDir);
     //write the port to the server.properties file
     const propertiesPath = path.join(serverRoot, "server.properties");
     fs.ensureFileSync(propertiesPath);
-    const mshConfPath = path.join(serverPath, "msh-config.json");
-    fs.ensureFileSync(mshConfPath);
-    const mshStartParam = `-Xmx${value.memory}G -Xms${value.memory}G`;
-    const minecraftPort = parseInt(port, 10) + 1;
-    const mshConf = {
-      Server: {
-        Folder: "./root/",
-        FileName: "server.jar",
-        Version: version,
-        Protocol: 760,
-      },
-      Commands: {
-        StartServer:
-          "java <Commands.StartServerParam> -jar <Server.FileName> nogui",
-        StartServerParam: mshStartParam,
-        StopServer: "stop",
-        StopServerAllowKill: 60,
-      },
-      Msh: {
-        Debug: 2,
-        ID: "",
-        MshPort: 0,
-        MshPortQuery: 0,
-        EnableQuery: true,
-        TimeBeforeStoppingEmptyServer: 1000,
-        SuspendAllow: false,
-        SuspendRefresh: -1,
-        InfoHibernation:
-          "                   §fserver status:\n                   §b§lHIBERNATING",
-        InfoStarting:
-          "                   §fserver status:\n                    §6§lWARMING UP",
-        NotifyUpdate: true,
-        NotifyMessage: true,
-        Whitelist: [],
-        WhitelistImport: false,
-        ShowResourceUsage: false,
-        ShowInternetUsage: false,
-      },
-    };
-    fs.writeFileSync(mshConfPath, JSON.stringify(mshConf, null, 2));
+    let minecraftPort;
+    if (value.mshConfig) {
+      const mshConfPath = path.join(serverPath, "msh-config.json");
+      fs.ensureFileSync(mshConfPath);
+      const mshStartParam = `-Xmx${value.memory}G -Xms${value.memory}G`;
+      minecraftPort = parseInt(port, 10) + 1;
+      const mshConf = {
+        Server: {
+          Folder: "./root/",
+          FileName: "server.jar",
+          Version: version,
+          Protocol: 760,
+        },
+        Commands: {
+          StartServer:
+            "java <Commands.StartServerParam> -jar <Server.FileName> nogui",
+          StartServerParam: mshStartParam,
+          StopServer: "stop",
+          StopServerAllowKill: 60,
+        },
+        Msh: {
+          Debug: 2,
+          ID: "",
+          MshPort: 0,
+          MshPortQuery: 0,
+          EnableQuery: true,
+          TimeBeforeStoppingEmptyServer: 1000,
+          SuspendAllow: false,
+          SuspendRefresh: -1,
+          InfoHibernation:
+            "                   §fserver status:\n                   §b§lHIBERNATING",
+          InfoStarting:
+            "                   §fserver status:\n                    §6§lWARMING UP",
+          NotifyUpdate: true,
+          NotifyMessage: true,
+          Whitelist: [],
+          WhitelistImport: false,
+          ShowResourceUsage: false,
+          ShowInternetUsage: false,
+        },
+      };
+      fs.writeFileSync(mshConfPath, JSON.stringify(mshConf, null, 2));
+    } else {
+      minecraftPort = port;
+    }
     const propertiesContent = `
 #Minecraft server properties
 #Thu May 16 21:56:35 EDT 2024
@@ -366,6 +395,7 @@ eula=true
       name,
       version,
       port,
+      serverType,
     });
   } catch (error) {
     console.error("Failed to download or create the server:", error);
@@ -514,7 +544,6 @@ io.use((socket, next) => {
         }
         fs.ensureFileSync(logFilePath);
         const history = fs.readFileSync(logFilePath, "utf8");
-        socket.path = row.path;
         socket.emit("output", history);
         if (terminals[serverId].isServerRunning) {
           socket.emit("serverStatus", true);
@@ -537,16 +566,22 @@ io.on("connection", (socket) => {
   });
   socket.on("startServer", () => {
     if (terminal && !terminal.isServerRunning) {
-      fs.ensureFileSync(
-        path.join(SERVERS_BASE_PATH, socket.serverId, "./minecraft_pid.txt")
-      );
-      terminal.ptyProcess.write(
-        `${terminal.startupCommand} & echo $! > ./minecraft_pid.txt; fg\n`
-      );
-      setTimeout(() => {
-        terminal.ptyProcess.write("msh start\n");
-      }, 1700);
-    } else if (terminal && terminal.isServerRunning) {
+      if (terminal.isMsh) {
+        fs.ensureFileSync(
+          path.join(SERVERS_BASE_PATH, socket.serverId, "./minecraft_pid.txt")
+        );
+        terminal.ptyProcess.write(
+          `${terminal.startupCommand} & echo $! > ./minecraft_pid.txt; fg\n`
+        );
+        setTimeout(() => {
+          terminal.ptyProcess.write("msh start\n");
+        }, 1700);
+      } else {
+        terminal.ptyProcess.write(
+          `${terminal.startupCommand} & echo $! > ../minecraft_pid.txt; fg\n`
+        );
+      }
+    } else if (terminal && terminal.isServerRunning && terminal.isMsh) {
       terminal.ptyProcess.write("msh start\n");
     } else {
       socket.emit(
@@ -556,11 +591,13 @@ io.on("connection", (socket) => {
     }
   });
   socket.on("stopServer", () => {
-    if (terminal && terminal.isServerRunning) {
+    if (terminal && terminal.isServerRunning && terminal.isMsh) {
       terminal.ptyProcess.write("msh exit\n");
       fs.removeSync(
         path.join(SERVERS_BASE_PATH, socket.serverId, "./minecraft_pid.txt")
       );
+    } else if (terminal && !terminal.isMsh && terminal.isServerRunning) {
+      terminal.ptyProcess.write("stop\n");
     } else {
       socket.emit(
         "output",
