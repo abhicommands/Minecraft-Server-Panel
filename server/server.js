@@ -21,6 +21,8 @@ const os = require("os");
 const kill = require("tree-kill");
 const Joi = require("joi");
 
+let terminals = {};
+
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -60,8 +62,6 @@ const serverCreateSchema = Joi.object({
 const serverUpdateSchema = Joi.object({
   version: Joi.string().required(),
 });
-
-let terminals = {};
 
 const createTerminal = (logDir, startupCommand, isMsh) => {
   const isWindows = process.platform === "win32";
@@ -166,19 +166,15 @@ const downloadMsh = async (serverRoot) => {
     : isArm
     ? "https://msh.gekware.net/builds/egg/msh-darwin-arm64.osx"
     : "https://msh.gekware.net/builds/egg/msh-darwin-amd64.osx";
-  console.log(mshUrl);
-  // const mshPath = path.join(
-  //   serverRoot,
-  //   isWindows ? "msh_server.exe" : isLinux ? "msh_server.bin" : "msh_server.osx"
-  // );
-  const mshPath = path.join(serverRoot, "msh_server.osx");
-  console.log(mshPath);
+  const mshPath = path.join(
+    serverRoot,
+    isWindows ? "msh_server.exe" : isLinux ? "msh_server.bin" : "msh_server.osx"
+  );
   const startupCommand = isWindows
     ? `./msh_server.exe`
     : isLinux
     ? `./msh_server.bin`
     : `./msh_server.osx`;
-
   await downloadFile(mshUrl, mshPath);
   fs.chmodSync(mshPath, 0o755);
   return startupCommand;
@@ -266,10 +262,6 @@ app.post("/servers", authenticate, async (req, res) => {
       console.error("Error downloading files:", error);
       return res.status(500).send("Failed to download server files");
     }
-    const terminal = createTerminal(logDir, startupCommand, value.mshConfig);
-    terminals[serverId] = terminal;
-    terminalPty = terminals[serverId];
-    initializeTerminal(serverId, terminalPty, logDir);
     //write the port to the server.properties file
     const propertiesPath = path.join(serverRoot, "server.properties");
     fs.ensureFileSync(propertiesPath);
@@ -390,6 +382,10 @@ white-list=false
 eula=true
 `;
     fs.writeFileSync(eulaPath, eulaContent);
+    const terminal = createTerminal(logDir, startupCommand, value.mshConfig);
+    terminals[serverId] = terminal;
+    terminalPty = terminals[serverId];
+    initializeTerminal(serverId, terminalPty, logDir);
     return res.json({
       id: serverId,
       name,
