@@ -22,6 +22,7 @@ import {
   DialogContent,
   DialogActions,
   useMediaQuery,
+  LinearProgress,
 } from "@mui/material";
 import {
   Folder as FolderIcon,
@@ -49,6 +50,7 @@ function FileManager() {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [destinationPath, setDestinationPath] = useState("");
   const [showNewFolderDialog, setShowNewFolderDialog] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0); // Add this state
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const API_URL = process.env.REACT_APP_API_URL;
@@ -79,17 +81,25 @@ function FileManager() {
       formData.append("files", file);
     });
     setLoading(true);
+    setUploadProgress(0);
     try {
       await axios.post(`${API_URL}/servers/${id}/upload`, formData, {
         params: { path },
         headers: { "Content-Type": "multipart/form-data" },
         withCredentials: true,
+        onUploadProgress: (progressEvent) => {
+          const percentCompleted = Math.round(
+            (progressEvent.loaded * 100) / progressEvent.total
+          );
+          setUploadProgress(percentCompleted); // Update progress
+        },
       });
       fetchFiles();
     } catch (error) {
       console.error("Error uploading files:", error);
     }
     setLoading(false);
+    setUploadProgress(0);
   };
 
   const { getRootProps, getInputProps } = useDropzone({
@@ -285,6 +295,15 @@ function FileManager() {
               {isSmallScreen ? "" : "Create New Directory"}
             </Button>
           </Box>
+          {/* Upload progress display */}
+          {loading && uploadProgress > 0 && (
+            <Box sx={{ width: "100%", mt: 2 }}>
+              <Typography variant="body2" color="textSecondary">
+                Uploading... {uploadProgress}%
+              </Typography>
+              <LinearProgress variant="determinate" value={uploadProgress} />
+            </Box>
+          )}
           {selectedFiles.length > 0 && (
             <Box sx={{ display: "flex", gap: 2 }}>
               <Button startIcon={<DownloadIcon />} onClick={downloadFiles}>

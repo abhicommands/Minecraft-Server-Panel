@@ -154,26 +154,14 @@ const CreateMinecraftServer = () => {
                 disabled={loading}
                 inputProps={{ min: 1, max: 32 }}
               />
-              <FormControl fullWidth>
-                <InputLabel>Minecraft Version</InputLabel>
-                <Select
-                  value={minecraftVersion}
-                  onChange={handleMinecraftVersionChange}
-                  disabled={loading}
-                >
-                  <MenuItem value="">Select Minecraft Version</MenuItem>
-                  <MenuItem value="1.7.10">1.7.10</MenuItem>
-                  <MenuItem value="1.8.9">1.8.9</MenuItem>
-                  <MenuItem value="1.12.2">1.12.2</MenuItem>
-                  <MenuItem value="1.16.5">1.16.5</MenuItem>
-                  <MenuItem value="1.17.1">1.17.1</MenuItem>
-                  <MenuItem value="1.18.1">1.18.1</MenuItem>
-                  <MenuItem value="1.19.3">1.19.3</MenuItem>
-                  <MenuItem value="1.20.2">1.20.2</MenuItem>
-                  <MenuItem value="1.20.4">1.20.4</MenuItem>
-                  <MenuItem value="latest">latest</MenuItem>
-                </Select>
-              </FormControl>
+              <TextField
+                label="Minecraft Version"
+                value={minecraftVersion}
+                onChange={handleMinecraftVersionChange}
+                fullWidth
+                disabled={loading}
+                placeholder="Enter Minecraft Version (e.g., 1.20.2)"
+              />
               <TextField
                 label="Port"
                 type="number"

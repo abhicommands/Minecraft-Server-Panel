@@ -5,6 +5,7 @@ const fs = require("fs-extra");
 const path = require("path");
 const { db, findServer } = require("../db/db");
 const archiver = require("archiver");
+const yauzl = require("yauzl");
 
 const router = express.Router();
 
@@ -149,6 +150,37 @@ router.post(
   }
 );
 
+function unzipWithYauzl(zipPath, outputDir, res) {
+  yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
+    if (err) {
+      console.error("Failed to open zip file:", err);
+      return res.status(500).send("Failed to open zip file");
+    }
+    zipfile.on("entry", (entry) => {
+      const entryPath = path.join(outputDir, entry.fileName);
+      if (/\/$/.test(entry.fileName)) {
+        fs.ensureDirSync(entryPath);
+        zipfile.readEntry();
+      } else {
+        zipfile.openReadStream(entry, (err, readStream) => {
+          if (err) {
+            console.error("Error reading zip entry:", err);
+            return res.status(500).send("Failed to unarchive file");
+          }
+          fs.ensureDirSync(path.dirname(entryPath));
+          const writeStream = fs.createWriteStream(entryPath);
+          readStream.pipe(writeStream);
+          readStream.on("end", () => zipfile.readEntry());
+        });
+      }
+    });
+    zipfile.once("end", () => {
+      res.send("File unarchived successfully");
+    });
+    zipfile.readEntry();
+  });
+}
+
 router.get("/servers/:id/unarchive", authenticate, findServer, (req, res) => {
   const fullPath = path.join(req.server.path, req.query.filePath || "");
   const normalizedPath = path.normalize(fullPath);
@@ -158,16 +190,7 @@ router.get("/servers/:id/unarchive", authenticate, findServer, (req, res) => {
   const zipName = path.basename(normalizedPath, path.extname(normalizedPath));
   const extractPath = path.join(path.dirname(normalizedPath), zipName);
   fs.ensureDirSync(extractPath);
-  fs.createReadStream(normalizedPath)
-    .pipe(require("unzipper").Extract({ path: extractPath }))
-    .promise()
-    .then(() => {
-      res.send("File unarchived successfully");
-    })
-    .catch((err) => {
-      console.error("Failed to unarchive file:", err);
-      res.status(500).send("Failed to unarchive file");
-    });
+  unzipWithYauzl(normalizedPath, extractPath, res);
 });
 
 router.get("/servers/:id/files/read", authenticate, findServer, (req, res) => {
@@ -291,27 +314,19 @@ router.post(
     if (!backupPath.startsWith(req.server.backupPath)) {
       return res.status(400).send("Invalid path");
     }
-    if (!fs.existsSync(backupPath))
+    if (!fs.existsSync(backupPath)) {
       return res.status(400).send("Backup not found");
-    if (fs.existsSync(path.join(req.server.path, "server.jar"))) {
-      fs.removeSync(path.join(req.server.path, "server.jar"));
     }
-    if (fs.existsSync(path.join(req.server.path, "world"))) {
-      fs.removeSync(path.join(req.server.path, "world"));
-    }
-    if (fs.existsSync(path.join(req.server.path, "mods"))) {
-      fs.removeSync(path.join(req.server.path, "mods"));
-    }
-    fs.createReadStream(backupPath)
-      .pipe(require("unzipper").Extract({ path: req.server.path }))
-      .promise()
-      .then(() => {
-        res.send("Backup restored successfully");
-      })
-      .catch((err) => {
-        console.error("Failed to restore backup:", err);
-        res.status(500).send("Failed to restore backup");
-      });
+
+    const serverJarPath = path.join(req.server.path, "server.jar");
+    const worldPath = path.join(req.server.path, "world");
+    const modsPath = path.join(req.server.path, "mods");
+
+    // Clean up existing files
+    if (fs.existsSync(serverJarPath)) fs.removeSync(serverJarPath);
+    if (fs.existsSync(worldPath)) fs.removeSync(worldPath);
+    if (fs.existsSync(modsPath)) fs.removeSync(modsPath);
+    unzipWithYauzl(backupPath, req.server.path, res);
   }
 );
 //download backup
