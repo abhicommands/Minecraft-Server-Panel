@@ -28,6 +28,18 @@ const serverCreateSchema = Joi.object({
   renderDistance: Joi.number().integer().min(2).max(32).required(),
 });
 
+const serverUpdateSchema = Joi.object({
+  version: Joi.string()
+    .trim()
+    .pattern(/^\d+\.\d+(?:\.\d+)?$/) // 1.x or 1.x.y
+    .required()
+    .messages({
+      "string.pattern.base":
+        "version must look like '1.21' or '1.20.1' (no 'latest'/'stable').",
+      "any.required": "version is required.",
+    }),
+});
+
 const downloadFile = async (url, dest) => {
   const response = await axios({
     method: "get",
