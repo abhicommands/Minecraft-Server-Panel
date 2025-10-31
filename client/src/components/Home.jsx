@@ -1,36 +1,24 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
-import { Typography, Card, Box } from "@mui/material";
+import { Typography, Card, Grid, Box } from "@mui/material";
 import { styled } from "@mui/system";
 import { API_URL } from "../config";
 
 const HomeContainer = styled(Box)`
-  padding: 24px;
-  width: 100%;
-  max-width: 1200px;
-  margin: 0 auto;
-`;
-
-const ServersList = styled(Box)`
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  width: 100%;
+  padding: 20px;
 `;
 
 const ServerCard = styled(Card)`
-  padding: 28px 36px;
+  padding: 20px;
+  margin-bottom: 20px;
   cursor: pointer;
-  transition: box-shadow 0.3s ease, transform 0.2s ease;
-  width: calc(100% - 12px);
+  transition: background-color 0.3s, box-shadow 0.3s;
+  width: 100%;
   box-sizing: border-box;
-  min-height: 120px;
-  border-radius: 12px;
-  background: #2e2e2e;
   &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+    background-color: #a9a9a9;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
   }
 `;
 
@@ -56,7 +44,7 @@ function Home() {
   };
 
   const handleServerClick = (serverId) => {
-    navigate(`/server/${serverId}`);
+    navigate(`/server/${serverId}/`);
   };
 
   return (
@@ -65,25 +53,21 @@ function Home() {
         Welcome {username}
       </Typography>
       {servers.length > 0 && (
-        <ServersList>
+        <Grid container spacing={3}>
           {servers.map((server) => (
-            <ServerCard
-              key={server.id}
-              elevation={6}
-              onClick={() => handleServerClick(server.id)}
-            >
-              <Typography variant="h5" gutterBottom>
-                {server.name}
-              </Typography>
-              <Typography variant="body1">
-                <strong>Port:</strong> {server.port}
-              </Typography>
-              <Typography variant="body1">
-                <strong>Version:</strong> {server.version}
-              </Typography>
-            </ServerCard>
+            <Grid item key={server.id} xs={12}>
+              <ServerCard onClick={() => handleServerClick(server.id)}>
+                <Typography variant="h6">{server.name}</Typography>
+                <Typography variant="body2">
+                  <strong>Port:</strong> {server.port}
+                </Typography>
+                <Typography variant="body2">
+                  <strong>Version:</strong> {server.version}
+                </Typography>
+              </ServerCard>
+            </Grid>
           ))}
-        </ServersList>
+        </Grid>
       )}
     </HomeContainer>
   );

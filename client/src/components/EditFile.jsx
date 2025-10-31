@@ -2,13 +2,13 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
+import { API_URL } from "../config";
 
 function EditFile() {
   const { id, encodedPath } = useParams();
   const [content, setContent] = useState("");
   const [fileName, setFileName] = useState("");
   const navigate = useNavigate();
-  const API_URL = process.env.REACT_APP_API_URL;
 
   useEffect(() => {
     const filePath = decodeURIComponent(encodedPath);
@@ -28,7 +28,7 @@ function EditFile() {
       }
     };
     fetchFileContent();
-  }, [id, encodedPath, API_URL]);
+  }, [id, encodedPath]);
 
   const saveFile = async () => {
     try {

@@ -63,6 +63,10 @@ const CreateMinecraftServer = () => {
     setServerType(e.target.value);
   };
 
+  const handleMshConfigChange = (e) => {
+    setMshConfig(e.target.checked);
+  };
+
   const handleRenderDistanceChange = (e) => {
     setRenderDistance(e.target.value);
   };
@@ -100,9 +104,9 @@ const CreateMinecraftServer = () => {
       .then(() => {
         window.location.href = "/";
       })
-      .catch((error) => {
+      .catch((err) => {
         alert("Failed to create the server. Please try again.");
-        console.error("Error:", error);
+        console.error("Error:", err);
         setLoading(false);
       });
   };
@@ -184,7 +188,7 @@ const CreateMinecraftServer = () => {
                 control={
                   <Switch
                     checked={mshConfig}
-                    onChange={(e) => setMshConfig(e.target.checked)}
+                    onChange={handleMshConfigChange}
                     disabled={loading}
                   />
                 }
