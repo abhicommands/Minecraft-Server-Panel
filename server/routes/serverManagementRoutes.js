@@ -374,17 +374,14 @@ eula=true
         console.error("Error downloading files:", error);
       }
       //change the version from the server database
-      db.run(
-        "UPDATE servers SET version = ?, startupCommand = ? WHERE uuid = ?",
-        [
-          version,
-          `./msh_server.osx -port ${req.server.port} -version ${version}`,
-          req.server.uuid,
-        ]
-      );
-      //change startupcommand of the terminal
+      db.run("UPDATE servers SET version = ? WHERE uuid = ?", [
+        version,
+        req.server.uuid,
+      ]);
       const terminal = terminals[req.server.uuid];
-      terminal.startupCommand = `./msh_server.osx -port ${req.server.port} -version ${version}`;
+      if (terminal) {
+        terminal.startupCommand = req.server.startupCommand;
+      }
       res.send("Server updated successfully");
     }
   );

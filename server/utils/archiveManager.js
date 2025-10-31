@@ -249,9 +249,6 @@ const startUnzipTask = ({
           processedEntries += 1;
           continue;
         }
-        console.log(
-          `[ArchiveManager] [${task.id}] extracting ${entry.isDirectory ? "dir" : "file"} ${entryName}`
-        );
         if (entry.isDirectory) {
           await fs.ensureDir(targetPath);
           processedEntries += 1;
@@ -271,39 +268,17 @@ const startUnzipTask = ({
           continue;
         }
         await fs.ensureDir(path.dirname(targetPath));
-        await new Promise((resolve, reject) => {
-          zip.stream(entryName, (err, stream) => {
-            if (err) return reject(err);
-            const writeStream = fs.createWriteStream(targetPath, {
-              flags: overwrite ? "w" : "wx",
-            });
-            stream.on("data", (chunk) => {
-              processedBytes += chunk.length;
-              const byteProgress =
-                totalBytes === 0
-                  ? 0
-                  : Math.min(processedBytes / totalBytes, 1);
-              updateTask(task.id, {
-                processedBytes,
-                progress: byteProgress,
-              });
-            });
-            stream.on("error", reject);
-            writeStream.on("error", reject);
-            writeStream.on("finish", resolve);
-            stream.pipe(writeStream);
-          });
-        });
-        console.log(
-          `[ArchiveManager] [${task.id}] extracted file ${entryName}`
-        );
+        await zip.extract(entryName, targetPath);
+        processedBytes += entry.size || 0;
         processedEntries += 1;
         const entryProgress =
           entryList.length === 0
             ? 1
             : Math.min(processedEntries / entryList.length, 1);
         const byteProgress =
-          totalBytes === 0 ? entryProgress : Math.min(processedBytes / totalBytes, 1);
+          totalBytes === 0
+            ? entryProgress
+            : Math.min(processedBytes / totalBytes, 1);
         updateTask(task.id, {
           entriesProcessed: processedEntries,
           processedBytes,

@@ -70,6 +70,7 @@ function FileManager() {
   const [uploadProgress, setUploadProgress] = useState(0); // Add this state
   const [loading, setLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [archiveTask, setArchiveTask] = useState(null);
   const [unarchiveTask, setUnarchiveTask] = useState(null);
   const [operationError, setOperationError] = useState(null);
@@ -285,7 +286,8 @@ function FileManager() {
 
   const deleteFiles = async () => {
     if (selectedFiles.length === 0) return;
-    setLoading(true);
+    setOperationError(null);
+    setIsDeleting(true);
     try {
       await axios.post(
         `${API_URL}/servers/${id}/files/delete/`,
@@ -295,11 +297,12 @@ function FileManager() {
         }
       );
       setSelectedFiles([]);
-      fetchFiles();
+      await fetchFiles();
     } catch (error) {
       console.error("Error deleting files:", error);
+      setOperationError("Failed to delete files");
     }
-    setLoading(false);
+    setIsDeleting(false);
   };
 
   const moveFiles = async () => {
@@ -438,6 +441,38 @@ function FileManager() {
     );
   };
 
+  const showOverlay =
+    isUploading || Boolean(archiveTask) || Boolean(unarchiveTask) || isDeleting;
+
+  const overlayHasProgress =
+    !isDeleting && (isUploading || Boolean(archiveTask) || Boolean(unarchiveTask));
+
+  const overlayProgress = overlayHasProgress
+    ? Math.min(
+        Math.max(
+          isUploading
+            ? uploadProgress
+            : archiveTask
+            ? archiveTask.progress ?? 0
+            : unarchiveTask
+            ? unarchiveTask.progress ?? 0
+            : 0,
+          0
+        ),
+        100
+      )
+    : undefined;
+
+  const overlayMessage = isUploading
+    ? `Uploading... ${uploadProgress}%`
+    : archiveTask
+    ? `Preparing archive... ${archiveTask.progress ?? 0}%`
+    : unarchiveTask
+    ? `Extracting archive... ${unarchiveTask.progress ?? 0}%`
+    : isDeleting
+    ? "Deleting files..."
+    : "";
+
   return (
     <FileManagerContainer {...getRootProps()}>
       <input {...getInputProps()} />
@@ -454,7 +489,12 @@ function FileManager() {
             <Button
               startIcon={<UploadIcon />}
               onClick={() => open()}
-              disabled={isUploading || Boolean(archiveTask) || Boolean(unarchiveTask)}
+              disabled={
+                isUploading ||
+                Boolean(archiveTask) ||
+                Boolean(unarchiveTask) ||
+                isDeleting
+              }
             >
               {isSmallScreen ? "" : "Upload"}
             </Button>
@@ -472,7 +512,10 @@ function FileManager() {
                 startIcon={<DownloadIcon />}
                 onClick={downloadFiles}
                 disabled={
-                  isUploading || Boolean(archiveTask) || Boolean(unarchiveTask)
+                  isUploading ||
+                  Boolean(archiveTask) ||
+                  Boolean(unarchiveTask) ||
+                  isDeleting
                 }
               >
                 {isSmallScreen ? "" : "Download Selected"}
@@ -481,7 +524,10 @@ function FileManager() {
                 startIcon={<DeleteIcon />}
                 onClick={deleteFiles}
                 disabled={
-                  isUploading || Boolean(archiveTask) || Boolean(unarchiveTask)
+                  isUploading ||
+                  Boolean(archiveTask) ||
+                  Boolean(unarchiveTask) ||
+                  isDeleting
                 }
               >
                 {isSmallScreen ? "" : "Delete Selected"}
@@ -497,7 +543,8 @@ function FileManager() {
                       disabled={
                         isUploading ||
                         Boolean(archiveTask) ||
-                        Boolean(unarchiveTask)
+                        Boolean(unarchiveTask) ||
+                        isDeleting
                       }
                     >
                       <ArrowForwardIcon />
@@ -548,14 +595,19 @@ function FileManager() {
                     <EditIcon />
                   </IconButton>
                 )}
-                {file.name.endsWith(".zip") && (
-                  <IconButton
-                    onClick={() => unarchiveFile(relativePath)}
-                    disabled={Boolean(unarchiveTask)}
-                  >
-                    <UnarchiveIcon />
-                  </IconButton>
-                )}
+              {file.name.endsWith(".zip") && (
+                <IconButton
+                  onClick={() => unarchiveFile(relativePath)}
+                  disabled={
+                    isUploading ||
+                    Boolean(archiveTask) ||
+                    Boolean(unarchiveTask) ||
+                    isDeleting
+                  }
+                >
+                  <UnarchiveIcon />
+                </IconButton>
+              )}
               </ListItem>
             );
           })}
@@ -602,33 +654,19 @@ function FileManager() {
         </DialogActions>
       </Dialog>
       <Backdrop
-        open={Boolean(isUploading || archiveTask || unarchiveTask)}
+        open={showOverlay}
         sx={{ zIndex: (theme) => theme.zIndex.drawer + 1, color: "#fff" }}
       >
         <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
           <CircularProgress
-            variant="determinate"
-            value={Math.min(
-              Math.max(
-                isUploading
-                  ? uploadProgress
-                  : archiveTask?.progress ?? unarchiveTask?.progress ?? 0,
-                0
-              ),
-              100
-            )}
+            variant={overlayHasProgress ? "determinate" : "indeterminate"}
+            value={overlayHasProgress ? overlayProgress : undefined}
             size={80}
             thickness={4}
           />
-          <Typography variant="body1">
-            {isUploading
-              ? `Uploading... ${uploadProgress}%`
-              : archiveTask
-              ? `Preparing archive... ${archiveTask.progress ?? 0}%`
-              : unarchiveTask
-              ? `Extracting archive... ${unarchiveTask.progress ?? 0}%`
-              : ""}
-          </Typography>
+          {overlayMessage && (
+            <Typography variant="body1">{overlayMessage}</Typography>
+          )}
         </Box>
       </Backdrop>
     </FileManagerContainer>

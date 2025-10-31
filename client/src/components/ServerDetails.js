@@ -81,9 +81,9 @@ function ServerDetails() {
   };
 
   const setTabValueBasedOnPath = (pathname) => {
-    if (pathname.endsWith(`/files`)) {
+    if (pathname.includes(`/files`)) {
       setTabValue(1);
-    } else if (pathname.endsWith(`/backup`)) {
+    } else if (pathname.includes(`/backup`)) {
       setTabValue(2);
     } else {
       setTabValue(0);
