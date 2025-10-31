@@ -162,7 +162,7 @@ function ServerDetails() {
             </Button>
           </Box>
           <Routes>
-            <Route path="files" element={<FileManager />} />
+            <Route path="files/*" element={<FileManager />} />
             <Route path="files/edit/:encodedPath" element={<EditFile />} />
             <Route path="backup" element={<ServerBackup />} />
             <Route path="/" element={<ServerConsole />} />

@@ -1,4 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useDropzone } from "react-dropzone";
@@ -22,7 +28,7 @@ import {
   DialogContent,
   DialogActions,
   useMediaQuery,
-  LinearProgress,
+  Backdrop,
 } from "@mui/material";
 import {
   Folder as FolderIcon,
@@ -43,25 +49,63 @@ const FileManagerContainer = styled(Box)`
 `;
 
 function FileManager() {
-  const { id } = useParams();
+  const params = useParams();
+  const { id } = params;
+  const rawPathParam = params["*"] || "";
+  const currentPath = useMemo(() => {
+    if (!rawPathParam) return "";
+    const segments = rawPathParam.split("/").filter(Boolean);
+    try {
+      return segments.map((segment) => decodeURIComponent(segment)).join("/");
+    } catch (error) {
+      console.error("Failed to decode path segment:", error);
+      return "";
+    }
+  }, [rawPathParam]);
   const [files, setFiles] = useState([]);
-  const [path, setPath] = useState("");
   const [newFolderName, setNewFolderName] = useState("");
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [destinationPath, setDestinationPath] = useState("");
   const [showNewFolderDialog, setShowNewFolderDialog] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0); // Add this state
   const [loading, setLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [archiveTask, setArchiveTask] = useState(null);
+  const [unarchiveTask, setUnarchiveTask] = useState(null);
+  const [operationError, setOperationError] = useState(null);
+  const archivePollRef = useRef(null);
+  const unarchivePollRef = useRef(null);
   const navigate = useNavigate();
   const API_URL = process.env.REACT_APP_API_URL;
   const theme = useTheme();
   const isSmallScreen = useMediaQuery(theme.breakpoints.down("sm"));
 
-  const fetchFiles = async () => {
+  const buildRelativePath = useCallback((base, name) => {
+    if (!base) return name;
+    return `${base.replace(/\/+$/, "")}/${name}`;
+  }, []);
+
+  const normalizedPath = currentPath;
+
+  useEffect(() => {
+    setSelectedFiles([]);
+    setDestinationPath("");
+  }, [normalizedPath]);
+
+  const fetchFiles = useCallback(async () => {
     setLoading(true);
+    const encodedPath = normalizedPath
+      ? normalizedPath
+          .split("/")
+          .filter(Boolean)
+          .map((segment) => encodeURIComponent(segment))
+          .join("/")
+      : "";
+    const endpoint = encodedPath
+      ? `${API_URL}/servers/${id}/files/${encodedPath}`
+      : `${API_URL}/servers/${id}/files`;
     try {
-      const response = await axios.get(`${API_URL}/servers/${id}/files`, {
-        params: { path },
+      const response = await axios.get(endpoint, {
         withCredentials: true,
       });
       setFiles(response.data);
@@ -69,22 +113,23 @@ function FileManager() {
       console.error("Error fetching files:", error);
     }
     setLoading(false);
-  };
+  }, [API_URL, id, normalizedPath]);
 
   useEffect(() => {
     fetchFiles();
-  }, [path, id]);
+  }, [fetchFiles]);
 
   const onDrop = async (acceptedFiles) => {
     const formData = new FormData();
     acceptedFiles.forEach((file) => {
       formData.append("files", file);
     });
-    setLoading(true);
     setUploadProgress(0);
+    setOperationError(null);
+    setIsUploading(true);
     try {
       await axios.post(`${API_URL}/servers/${id}/upload`, formData, {
-        params: { path },
+        params: { path: normalizedPath },
         headers: { "Content-Type": "multipart/form-data" },
         withCredentials: true,
         onUploadProgress: (progressEvent) => {
@@ -97,12 +142,13 @@ function FileManager() {
       fetchFiles();
     } catch (error) {
       console.error("Error uploading files:", error);
+      setOperationError("Failed to upload files");
     }
-    setLoading(false);
+    setIsUploading(false);
     setUploadProgress(0);
   };
 
-  const { getRootProps, getInputProps } = useDropzone({
+  const { getRootProps, getInputProps, open } = useDropzone({
     onDrop,
     noClick: true,
     noKeyboard: true,
@@ -116,7 +162,7 @@ function FileManager() {
         `${API_URL}/servers/${id}/folders`,
         { name: newFolderName },
         {
-          params: { path },
+          params: { path: normalizedPath },
           withCredentials: true,
         }
       );
@@ -129,36 +175,112 @@ function FileManager() {
     setLoading(false);
   };
 
+  const buildNavigatePath = useCallback(
+    (nextPath) => {
+      const sanitized = nextPath
+        .split("/")
+        .filter(Boolean)
+        .map((segment) => encodeURIComponent(segment))
+        .join("/");
+      return sanitized
+        ? `/server/${id}/files/${sanitized}`
+        : `/server/${id}/files`;
+    },
+    [id]
+  );
+
   const handleFolderChange = (newPath) => {
-    setPath(newPath);
+    navigate(buildNavigatePath(newPath));
+  };
+
+  const clearArchivePolling = useCallback(() => {
+    if (archivePollRef.current) {
+      clearInterval(archivePollRef.current);
+      archivePollRef.current = null;
+    }
+  }, []);
+
+  const clearUnarchivePolling = useCallback(() => {
+    if (unarchivePollRef.current) {
+      clearInterval(unarchivePollRef.current);
+      unarchivePollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearArchivePolling();
+      clearUnarchivePolling();
+    };
+  }, [clearArchivePolling, clearUnarchivePolling]);
+
+  const triggerArchiveDownload = (taskId, fileName) => {
+    const link = document.createElement("a");
+    link.href = `${API_URL}/servers/${id}/files/archive/download/${taskId}`;
+    if (fileName) {
+      link.setAttribute("download", fileName);
+    }
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const downloadFiles = async () => {
     if (selectedFiles.length === 0) return;
-    setLoading(true);
+    clearArchivePolling();
     try {
+      setOperationError(null);
       const response = await axios.post(
-        `${API_URL}/servers/${id}/files/download`,
+        `${API_URL}/servers/${id}/files/archive`,
         { files: selectedFiles },
         {
-          responseType: "blob",
           withCredentials: true,
         }
       );
-      const fileName =
-        selectedFiles.length === 1 ? selectedFiles[0] : "files.zip";
-      const url = window.URL.createObjectURL(new Blob([response.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", fileName);
-      document.body.appendChild(link);
-      link.click();
-      link.parentNode.removeChild(link);
-      setSelectedFiles([]);
+      const { taskId, fileName, status } = response.data;
+      setArchiveTask({ taskId, fileName, status, progress: 0 });
+
+      const pollStatus = async () => {
+        try {
+          const { data } = await axios.get(
+            `${API_URL}/servers/${id}/files/archive/status/${taskId}`,
+            {
+              withCredentials: true,
+            }
+          );
+          const percent = Math.round((data.progress || 0) * 100);
+          setArchiveTask({
+            taskId,
+            fileName: data.fileName || fileName,
+            status: data.status,
+            progress: percent,
+            message: data.message,
+          });
+          if (data.status === "completed") {
+            clearArchivePolling();
+            triggerArchiveDownload(taskId, data.fileName || fileName);
+            setArchiveTask(null);
+            setSelectedFiles([]);
+            fetchFiles();
+          } else if (data.status === "error") {
+            clearArchivePolling();
+            setArchiveTask(null);
+            setOperationError(data.message || "Failed to archive files");
+          }
+        } catch (error) {
+          console.error("Failed to poll archive status:", error);
+          clearArchivePolling();
+          setArchiveTask(null);
+          setOperationError("Failed to retrieve archive status");
+        }
+      };
+
+      await pollStatus();
+      archivePollRef.current = setInterval(pollStatus, 1500);
     } catch (error) {
-      console.error("Error downloading files:", error);
+      console.error("Error starting archive:", error);
+      setOperationError("Failed to start archive");
     }
-    setLoading(false);
   };
 
   const deleteFiles = async () => {
@@ -204,17 +326,58 @@ function FileManager() {
   };
 
   const unarchiveFile = async (filePath) => {
-    setLoading(true);
+    clearUnarchivePolling();
     try {
-      await axios.get(`${API_URL}/servers/${id}/unarchive`, {
-        params: { filePath },
-        withCredentials: true,
-      });
-      fetchFiles();
+      setOperationError(null);
+      const response = await axios.post(
+        `${API_URL}/servers/${id}/files/unarchive`,
+        { filePath },
+        {
+          withCredentials: true,
+        }
+      );
+      const { taskId, status } = response.data;
+      setUnarchiveTask({ taskId, filePath, status, progress: 0 });
+
+      const pollStatus = async () => {
+        try {
+          const { data } = await axios.get(
+            `${API_URL}/servers/${id}/files/unarchive/status/${taskId}`,
+            {
+              withCredentials: true,
+            }
+          );
+          const percent = Math.round((data.progress || 0) * 100);
+          setUnarchiveTask({
+            taskId,
+            filePath,
+            status: data.status,
+            progress: percent,
+            message: data.message,
+          });
+          if (data.status === "completed") {
+            clearUnarchivePolling();
+            setUnarchiveTask(null);
+            fetchFiles();
+          } else if (data.status === "error") {
+            clearUnarchivePolling();
+            setUnarchiveTask(null);
+            setOperationError(data.message || "Failed to unarchive");
+          }
+        } catch (error) {
+          console.error("Failed to poll unarchive status:", error);
+          clearUnarchivePolling();
+          setUnarchiveTask(null);
+          setOperationError("Failed to retrieve unarchive status");
+        }
+      };
+
+      await pollStatus();
+      unarchivePollRef.current = setInterval(pollStatus, 1500);
     } catch (error) {
-      console.error("Error unarchiving file:", error);
+      console.error("Error starting unarchive:", error);
+      setOperationError("Failed to start unarchive");
     }
-    setLoading(false);
   };
 
   const toggleFileSelection = (fileName) => {
@@ -237,17 +400,18 @@ function FileManager() {
   };
 
   const renderBreadcrumbs = () => {
-    const pathSegments = path.split("/").filter(Boolean);
+    const pathSegments = normalizedPath.split("/").filter(Boolean);
     const breadcrumbs = pathSegments.map((segment, index) => {
       const breadcrumbPath = pathSegments.slice(0, index + 1).join("/");
+      const isActive = normalizedPath === breadcrumbPath;
       return (
         <Link
           key={breadcrumbPath}
-          onClick={() => setPath(breadcrumbPath)}
+          onClick={() => navigate(buildNavigatePath(breadcrumbPath))}
           sx={{
-            cursor: path === breadcrumbPath ? "default" : "pointer",
-            color: path === breadcrumbPath ? "text.disabled" : "primary.main",
-            textDecoration: path === breadcrumbPath ? "none" : "underline",
+            cursor: isActive ? "default" : "pointer",
+            color: isActive ? "text.disabled" : "primary.main",
+            textDecoration: isActive ? "none" : "underline",
           }}
         >
           {segment}
@@ -258,11 +422,13 @@ function FileManager() {
     return (
       <Breadcrumbs aria-label="breadcrumb" sx={{ marginBottom: "16px" }}>
         <Link
-          onClick={() => path !== "" && setPath("")}
+          onClick={() =>
+            normalizedPath !== "" && navigate(buildNavigatePath(""))
+          }
           sx={{
-            cursor: path === "" ? "default" : "pointer",
-            color: path === "" ? "text.disabled" : "primary.main",
-            textDecoration: path === "" ? "none" : "underline",
+            cursor: normalizedPath === "" ? "default" : "pointer",
+            color: normalizedPath === "" ? "text.disabled" : "primary.main",
+            textDecoration: normalizedPath === "" ? "none" : "underline",
           }}
         >
           root
@@ -278,13 +444,17 @@ function FileManager() {
       <Card sx={{ padding: "24px", boxShadow: 3 }}>
         <Typography variant="h5">File Manager</Typography>
         {renderBreadcrumbs()}
+        {operationError && (
+          <Typography color="error" variant="body2" sx={{ mb: 1 }}>
+            {operationError}
+          </Typography>
+        )}
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
           <Box sx={{ display: "flex", gap: 2 }}>
             <Button
               startIcon={<UploadIcon />}
-              onClick={() =>
-                document.querySelector('input[type="file"]').click()
-              }
+              onClick={() => open()}
+              disabled={isUploading || Boolean(archiveTask) || Boolean(unarchiveTask)}
             >
               {isSmallScreen ? "" : "Upload"}
             </Button>
@@ -295,21 +465,25 @@ function FileManager() {
               {isSmallScreen ? "" : "Create New Directory"}
             </Button>
           </Box>
-          {/* Upload progress display */}
-          {loading && uploadProgress > 0 && (
-            <Box sx={{ width: "100%", mt: 2 }}>
-              <Typography variant="body2" color="textSecondary">
-                Uploading... {uploadProgress}%
-              </Typography>
-              <LinearProgress variant="determinate" value={uploadProgress} />
-            </Box>
-          )}
+          {/* Upload progress handled by backdrop only */}
           {selectedFiles.length > 0 && (
             <Box sx={{ display: "flex", gap: 2 }}>
-              <Button startIcon={<DownloadIcon />} onClick={downloadFiles}>
+              <Button
+                startIcon={<DownloadIcon />}
+                onClick={downloadFiles}
+                disabled={
+                  isUploading || Boolean(archiveTask) || Boolean(unarchiveTask)
+                }
+              >
                 {isSmallScreen ? "" : "Download Selected"}
               </Button>
-              <Button startIcon={<DeleteIcon />} onClick={deleteFiles}>
+              <Button
+                startIcon={<DeleteIcon />}
+                onClick={deleteFiles}
+                disabled={
+                  isUploading || Boolean(archiveTask) || Boolean(unarchiveTask)
+                }
+              >
                 {isSmallScreen ? "" : "Delete Selected"}
               </Button>
               <TextField
@@ -318,7 +492,14 @@ function FileManager() {
                 placeholder="Move to path"
                 InputProps={{
                   endAdornment: (
-                    <IconButton onClick={moveFiles}>
+                    <IconButton
+                      onClick={moveFiles}
+                      disabled={
+                        isUploading ||
+                        Boolean(archiveTask) ||
+                        Boolean(unarchiveTask)
+                      }
+                    >
                       <ArrowForwardIcon />
                     </IconButton>
                   ),
@@ -328,54 +509,56 @@ function FileManager() {
           )}
         </Box>
         <List>
-          {files.map((file) => (
-            <ListItem
-              key={file.name}
-              secondaryAction={
-                <Checkbox
-                  edge="end"
-                  checked={selectedFiles.includes(`${path}/${file.name}`)}
-                  onChange={() => toggleFileSelection(`${path}/${file.name}`)}
-                />
-              }
-            >
-              <ListItemIcon>
-                {file.type === "directory" ? <FolderIcon /> : <FileIcon />}
-              </ListItemIcon>
-              <ListItemText
-                primary={
-                  file.type === "directory" ? (
-                    <Link
-                      onClick={() => handleFolderChange(`${path}/${file.name}`)}
-                      sx={{
-                        cursor: "pointer",
-                        color: "primary.main",
-                        textDecoration: "underline",
-                      }}
-                    >
-                      {file.name}
-                    </Link>
-                  ) : (
-                    file.name
-                  )
+          {files.map((file) => {
+            const relativePath = buildRelativePath(normalizedPath, file.name);
+            return (
+              <ListItem
+                key={file.name}
+                secondaryAction={
+                  <Checkbox
+                    edge="end"
+                    checked={selectedFiles.includes(relativePath)}
+                    onChange={() => toggleFileSelection(relativePath)}
+                  />
                 }
-              />
-              {file.type !== "directory" && isEditable(file.name) && (
-                <IconButton
-                  onClick={() => openFileEditor(`${path}/${file.name}`)}
-                >
-                  <EditIcon />
-                </IconButton>
-              )}
-              {file.name.endsWith(".zip") && (
-                <IconButton
-                  onClick={() => unarchiveFile(`${path}/${file.name}`)}
-                >
-                  <UnarchiveIcon />
-                </IconButton>
-              )}
-            </ListItem>
-          ))}
+              >
+                <ListItemIcon>
+                  {file.type === "directory" ? <FolderIcon /> : <FileIcon />}
+                </ListItemIcon>
+                <ListItemText
+                  primary={
+                    file.type === "directory" ? (
+                      <Link
+                        onClick={() => handleFolderChange(relativePath)}
+                        sx={{
+                          cursor: "pointer",
+                          color: "primary.main",
+                          textDecoration: "underline",
+                        }}
+                      >
+                        {file.name}
+                      </Link>
+                    ) : (
+                      file.name
+                    )
+                  }
+                />
+                {file.type !== "directory" && isEditable(file.name) && (
+                  <IconButton onClick={() => openFileEditor(relativePath)}>
+                    <EditIcon />
+                  </IconButton>
+                )}
+                {file.name.endsWith(".zip") && (
+                  <IconButton
+                    onClick={() => unarchiveFile(relativePath)}
+                    disabled={Boolean(unarchiveTask)}
+                  >
+                    <UnarchiveIcon />
+                  </IconButton>
+                )}
+              </ListItem>
+            );
+          })}
         </List>
         {loading && (
           <Box
@@ -418,6 +601,36 @@ function FileManager() {
           <Button onClick={createFolder}>Create</Button>
         </DialogActions>
       </Dialog>
+      <Backdrop
+        open={Boolean(isUploading || archiveTask || unarchiveTask)}
+        sx={{ zIndex: (theme) => theme.zIndex.drawer + 1, color: "#fff" }}
+      >
+        <Box display="flex" flexDirection="column" alignItems="center" gap={2}>
+          <CircularProgress
+            variant="determinate"
+            value={Math.min(
+              Math.max(
+                isUploading
+                  ? uploadProgress
+                  : archiveTask?.progress ?? unarchiveTask?.progress ?? 0,
+                0
+              ),
+              100
+            )}
+            size={80}
+            thickness={4}
+          />
+          <Typography variant="body1">
+            {isUploading
+              ? `Uploading... ${uploadProgress}%`
+              : archiveTask
+              ? `Preparing archive... ${archiveTask.progress ?? 0}%`
+              : unarchiveTask
+              ? `Extracting archive... ${unarchiveTask.progress ?? 0}%`
+              : ""}
+          </Typography>
+        </Box>
+      </Backdrop>
     </FileManagerContainer>
   );
 }
