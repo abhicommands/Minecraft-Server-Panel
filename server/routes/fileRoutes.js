@@ -4,14 +4,54 @@ const multer = require("multer");
 const fs = require("fs-extra");
 const path = require("path");
 const { db, findServer } = require("../db/db");
-const archiver = require("archiver");
-const yauzl = require("yauzl");
+const {
+  startZipTask,
+  startUnzipTask,
+  getTaskStatus,
+  streamZipResult,
+  TASK_STATUS,
+  TASK_TYPES,
+} = require("../utils/archiveManager");
 
 const router = express.Router();
 
-// Files management
+const normalizeRelativePath = (value = "") =>
+  value.replace(/\\/g, "/").replace(/^\/+/, "");
+
+const decodePath = (raw = "") =>
+  raw
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => {
+      try {
+        return decodeURIComponent(segment);
+      } catch (error) {
+        throw new Error("Invalid path segment");
+      }
+    })
+    .join("/");
+
+const resolveServerPath = (basePath, relativePath = "") => {
+  const normalizedRelative = normalizeRelativePath(relativePath);
+  const absolutePath = path.normalize(path.join(basePath, normalizedRelative));
+  if (!absolutePath.startsWith(basePath)) {
+    throw new Error("Invalid path");
+  }
+  return absolutePath;
+};
+
+const listDirectory = async (basePath, relativePath = "") => {
+  const absolutePath = resolveServerPath(basePath, relativePath);
+  const entries = await fs.readdir(absolutePath, { withFileTypes: true });
+  return entries.map((entry) => ({
+    name: entry.name,
+    type: entry.isDirectory() ? "directory" : "file",
+    path: normalizeRelativePath(path.join(relativePath, entry.name)),
+  }));
+};
+
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
+  destination(req, file, cb) {
     const serverId = req.params.id;
     db.get(
       "SELECT * FROM servers WHERE uuid = ?",
@@ -23,21 +63,25 @@ const storage = multer.diskStorage({
         if (!server) {
           return cb(new Error("Server not found"));
         }
-        let uploadPath = path.join(server.path, req.query.path || "");
-        uploadPath = path.normalize(uploadPath);
-        if (!uploadPath.startsWith(server.path)) {
-          return cb(new Error("Invalid path"));
+        try {
+          const uploadPath = resolveServerPath(
+            server.path,
+            req.query.path || ""
+          );
+          fs.ensureDirSync(uploadPath);
+          cb(null, uploadPath);
+        } catch (error) {
+          cb(new Error("Invalid path"));
         }
-        fs.ensureDirSync(uploadPath);
-        cb(null, uploadPath);
       }
     );
   },
-  filename: function (req, file, cb) {
+  filename(req, file, cb) {
     cb(null, file.originalname);
   },
 });
-const upload = multer({ storage: storage });
+
+const upload = multer({ storage });
 
 router.post(
   "/servers/:id/upload",
@@ -48,35 +92,35 @@ router.post(
   }
 );
 
-router.get("/servers/:id/files", authenticate, findServer, (req, res) => {
-  const fullPath = path.join(req.server.path, req.query.path || "");
-  const normalizedPath = path.normalize(fullPath);
-  if (!normalizedPath.startsWith(req.server.path)) {
-    return res.status(400).send("Invalid path");
-  }
-  fs.readdir(normalizedPath, { withFileTypes: true }, (err, files) => {
-    if (err) {
-      console.error("Failed to read directory:", err);
-      return res.status(500).send("Failed to read directory");
-    }
-    const items = files.map((file) => ({
-      name: file.name,
-      type: file.isDirectory() ? "directory" : "file",
-      path: path.join(req.query.path || "", file.name),
-    }));
+router.get("/servers/:id/files", authenticate, findServer, async (req, res) => {
+  try {
+    const items = await listDirectory(req.server.path, req.query.path || "");
     res.json(items);
-  });
+  } catch (error) {
+    if (error.message === "Invalid path" || error.message === "Invalid path segment") {
+      return res.status(400).send("Invalid path");
+    }
+    console.error("Failed to read directory:", error);
+    res.status(500).send("Failed to read directory");
+  }
 });
 
-router.post("/servers/:id/folders", authenticate, findServer, (req, res) => {
-  const fullPath = path.join(req.server.path, req.query.path || "");
-  const normalizedPath = path.normalize(fullPath);
-  if (!normalizedPath.startsWith(req.server.path)) {
-    return res.status(400).send("Invalid path");
+router.post("/servers/:id/folders", authenticate, findServer, async (req, res) => {
+  try {
+    const directoryPath = resolveServerPath(
+      req.server.path,
+      req.query.path || ""
+    );
+    const newFolderPath = path.join(directoryPath, req.body.name);
+    fs.ensureDirSync(newFolderPath);
+    res.send("Folder created successfully");
+  } catch (error) {
+    if (error.message === "Invalid path") {
+      return res.status(400).send("Invalid path");
+    }
+    console.error("Error creating folder:", error);
+    res.status(500).send("Failed to create folder");
   }
-  const folderPath = path.join(normalizedPath, req.body.name);
-  fs.ensureDirSync(folderPath);
-  res.send("Folder created successfully");
 });
 
 router.post(
@@ -84,210 +128,307 @@ router.post(
   authenticate,
   findServer,
   (req, res) => {
-    const filesToDelete = req.body.files.map((file) =>
-      path.normalize(path.join(req.server.path, file))
-    );
-    filesToDelete.forEach((filePath) => {
-      if (!filePath.startsWith(req.server.path)) {
+    try {
+      const targets = (req.body.files || []).map((file) =>
+        resolveServerPath(req.server.path, file)
+      );
+      targets.forEach((filePath) => {
+        fs.removeSync(filePath);
+      });
+      res.send("Files deleted successfully");
+    } catch (error) {
+      if (error.message === "Invalid path") {
         return res.status(400).send("Invalid path");
       }
-      fs.removeSync(filePath);
-    });
-    res.send("Files deleted successfully");
+      console.error("Failed to delete files:", error);
+      res.status(500).send("Failed to delete files");
+    }
   }
 );
 
 router.post(
-  "/servers/:id/files/download",
+  "/servers/:id/files/archive",
   authenticate,
   findServer,
-  (req, res) => {
-    const filesToDownload = req.body.files.map((file) =>
-      path.normalize(path.join(req.server.path, file))
-    );
-    if (
-      filesToDownload.length === 1 &&
-      fs.lstatSync(filesToDownload[0]).isFile() &&
-      fs.existsSync(filesToDownload[0]) &&
-      filesToDownload[0].startsWith(req.server.path)
-    ) {
-      res.download(filesToDownload[0]);
-      return;
+  async (req, res) => {
+    const relativePaths = req.body.files || [];
+    if (!relativePaths.length) {
+      return res.status(400).send("No files selected");
     }
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader(
-      "Content-Disposition",
-      "attachment; filename=downloaded_files.zip"
-    );
-    const archive = archiver("zip", { zlib: { level: 9 } });
-    archive.on("error", function (err) {
-      res.status(500).send("Error creating zip file: " + err.message);
-    });
-    archive.on("error", function (err) {
-      res.status(500).send("Error creating zip file: " + err.message);
-      archive.abort();
-    });
-    archive.pipe(res);
-    filesToDownload.forEach((filePath) => {
-      if (!fs.existsSync(filePath)) {
-        res.status(400).send("Invalid path");
-        archive.abort();
-        return;
+    try {
+      const entries = relativePaths.map((relative) => {
+        const sourcePath = resolveServerPath(req.server.path, relative);
+        return {
+          sourcePath,
+          destName: normalizeRelativePath(relative) || path.basename(sourcePath),
+        };
+      });
+      const tempDir = path.join(req.server.path, "..", "tmp-archives");
+      const { taskId, fileName, status } = startZipTask({
+        entries,
+        outputDir: tempDir,
+        cleanup: true,
+        meta: {
+        scope: "files-archive",
+        serverId: req.params.id,
+        },
+      });
+      res.status(202).json({ taskId, fileName, status });
+    } catch (error) {
+      if (error.message === "Invalid path") {
+        return res.status(400).send("Invalid path");
       }
-      if (!filePath.startsWith(req.server.path)) {
-        res.status(400).send("Invalid path");
-        archive.abort();
-        return;
-      }
-      if (fs.lstatSync(filePath).isDirectory()) {
-        archive.directory(filePath, path.basename(filePath));
-      } else if (fs.lstatSync(filePath).isFile()) {
-        archive.file(filePath, { name: path.basename(filePath) });
-      }
-    });
-
-    archive.finalize();
+      console.error("Failed to start archive task:", error);
+      res.status(500).send("Failed to start archive task");
+    }
   }
 );
 
-function unzipWithYauzl(zipPath, outputDir, res) {
-  yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
-    if (err) {
-      console.error("Failed to open zip file:", err);
-      return res.status(500).send("Failed to open zip file");
+router.get(
+  "/servers/:id/files/archive/status/:taskId",
+  authenticate,
+  findServer,
+  (req, res) => {
+    const task = getTaskStatus(req.params.taskId);
+    if (!task || task.type !== TASK_TYPES.ZIP) {
+      return res.status(404).send("Task not found");
     }
-    zipfile.on("entry", (entry) => {
-      const entryPath = path.join(outputDir, entry.fileName);
-      if (/\/$/.test(entry.fileName)) {
-        fs.ensureDirSync(entryPath);
-        zipfile.readEntry();
-      } else {
-        zipfile.openReadStream(entry, (err, readStream) => {
-          if (err) {
-            console.error("Error reading zip entry:", err);
-            return res.status(500).send("Failed to unarchive file");
-          }
-          fs.ensureDirSync(path.dirname(entryPath));
-          const writeStream = fs.createWriteStream(entryPath);
-          readStream.pipe(writeStream);
-          readStream.on("end", () => zipfile.readEntry());
-        });
-      }
-    });
-    zipfile.once("end", () => {
-      res.send("File unarchived successfully");
-    });
-    zipfile.readEntry();
-  });
-}
-
-router.get("/servers/:id/unarchive", authenticate, findServer, (req, res) => {
-  const fullPath = path.join(req.server.path, req.query.filePath || "");
-  const normalizedPath = path.normalize(fullPath);
-  if (!normalizedPath.startsWith(req.server.path)) {
-    return res.status(400).send("Invalid path");
+    if (task.meta?.serverId && task.meta.serverId !== req.params.id) {
+      return res.status(404).send("Task not found");
+    }
+    res.json(task);
   }
-  const zipName = path.basename(normalizedPath, path.extname(normalizedPath));
-  const extractPath = path.join(path.dirname(normalizedPath), zipName);
-  fs.ensureDirSync(extractPath);
-  unzipWithYauzl(normalizedPath, extractPath, res);
-});
+);
+
+router.get(
+  "/servers/:id/files/archive/download/:taskId",
+  authenticate,
+  findServer,
+  (req, res) => {
+    const task = getTaskStatus(req.params.taskId);
+    if (!task || task.type !== TASK_TYPES.ZIP) {
+      return res.status(404).send("Task not found");
+    }
+    if (task.meta?.serverId && task.meta.serverId !== req.params.id) {
+      return res.status(404).send("Task not found");
+    }
+    streamZipResult(req.params.taskId, res, { removeOnComplete: true });
+  }
+);
+
+router.post(
+  "/servers/:id/files/unarchive",
+  authenticate,
+  findServer,
+  (req, res) => {
+    try {
+      const archivePath = resolveServerPath(
+        req.server.path,
+        req.body.filePath || ""
+      );
+      const destination = req.body.destination
+        ? resolveServerPath(req.server.path, req.body.destination)
+        : path.join(
+            path.dirname(archivePath),
+            path.basename(archivePath, path.extname(archivePath))
+          );
+      const { taskId, status } = startUnzipTask({
+        archivePath,
+        destination,
+        overwrite: true,
+        meta: {
+        scope: "files-unarchive",
+        serverId: req.params.id,
+        },
+      });
+      res.status(202).json({ taskId, status });
+    } catch (error) {
+      if (error.message === "Invalid path") {
+        return res.status(400).send("Invalid path");
+      }
+      console.error("Failed to start unarchive task:", error);
+      res.status(500).send("Failed to start unarchive task");
+    }
+  }
+);
+
+router.get(
+  "/servers/:id/files/unarchive/status/:taskId",
+  authenticate,
+  findServer,
+  (req, res) => {
+    const task = getTaskStatus(req.params.taskId);
+    if (!task || task.type !== TASK_TYPES.UNZIP) {
+      return res.status(404).send("Task not found");
+    }
+    if (task.meta?.serverId && task.meta.serverId !== req.params.id) {
+      return res.status(404).send("Task not found");
+    }
+    res.json(task);
+  }
+);
 
 router.get("/servers/:id/files/read", authenticate, findServer, (req, res) => {
-  const fullPath = path.join(req.server.path, req.query.filePath || "");
-  const normalizedPath = path.normalize(fullPath);
-  if (!normalizedPath.startsWith(req.server.path)) {
-    return res.status(400).send("Invalid path");
-  }
-  if (
-    !fs.existsSync(normalizedPath) ||
-    fs.lstatSync(normalizedPath).isDirectory()
-  ) {
-    return res.status(400).send("Invalid file path");
-  }
-  const editableExtensions = [".txt", ".json", ".properties", ".log"]; // Add other extensions as needed
-  if (!editableExtensions.some((ext) => normalizedPath.endsWith(ext))) {
-    return res.status(400).send("File is not editable");
-  }
-  fs.readFile(normalizedPath, "utf8", (err, data) => {
-    if (err) {
-      console.error("Failed to read file:", err);
-      return res.status(500).send("Failed to read file");
+  try {
+    const filePath = resolveServerPath(
+      req.server.path,
+      req.query.filePath || ""
+    );
+    if (
+      !fs.existsSync(filePath) ||
+      fs.lstatSync(filePath).isDirectory()
+    ) {
+      return res.status(400).send("Invalid file path");
     }
+    const editableExtensions = [".txt", ".json", ".properties", ".log"];
+    if (!editableExtensions.some((ext) => filePath.endsWith(ext))) {
+      return res.status(400).send("File is not editable");
+    }
+    const data = fs.readFileSync(filePath, "utf8");
     res.send(data);
-  });
+  } catch (error) {
+    if (error.message === "Invalid path") {
+      return res.status(400).send("Invalid path");
+    }
+    console.error("Failed to read file:", error);
+    res.status(500).send("Failed to read file");
+  }
 });
 
 router.post("/servers/:id/files/save", authenticate, findServer, (req, res) => {
-  const fullPath = path.join(req.server.path, req.body.path || "");
-  const normalizedPath = path.normalize(fullPath);
-  if (!normalizedPath.startsWith(req.server.path)) {
-    return res.status(400).send("Invalid path");
-  }
-  fs.writeFile(normalizedPath, req.body.content, "utf8", (err) => {
-    if (err) {
-      console.error("Failed to save file:", err);
-      return res.status(500).send("Failed to save file");
-    }
+  try {
+    const filePath = resolveServerPath(req.server.path, req.body.path || "");
+    fs.writeFileSync(filePath, req.body.content, "utf8");
     res.send("File saved successfully");
-  });
-});
-//move selected files to a new location
-router.post("/servers/:id/files/move", authenticate, findServer, (req, res) => {
-  const filesToMove = req.body.files.map((file) =>
-    path.normalize(path.join(req.server.path, file))
-  );
-  const destination = path.normalize(
-    path.join(req.server.path, req.body.destination)
-  );
-  if (!destination.startsWith(req.server.path)) {
-    return res.status(400).send("Invalid path");
-  }
-  filesToMove.forEach((filePath) => {
-    if (!filePath.startsWith(req.server.path)) {
+  } catch (error) {
+    if (error.message === "Invalid path") {
       return res.status(400).send("Invalid path");
     }
-    fs.moveSync(filePath, path.join(destination, path.basename(filePath)));
-  });
-  res.send("Files moved successfully");
+    console.error("Failed to save file:", error);
+    res.status(500).send("Failed to save file");
+  }
 });
 
-//create backups
+router.post(
+  "/servers/:id/files/move",
+  authenticate,
+  findServer,
+  (req, res) => {
+    try {
+      const destination = resolveServerPath(
+        req.server.path,
+        req.body.destination || ""
+      );
+      const targets = (req.body.files || []).map((file) =>
+        resolveServerPath(req.server.path, file)
+      );
+      targets.forEach((filePath) => {
+        fs.moveSync(filePath, path.join(destination, path.basename(filePath)));
+      });
+      res.send("Files moved successfully");
+    } catch (error) {
+      if (error.message === "Invalid path") {
+        return res.status(400).send("Invalid path");
+      }
+      console.error("Failed to move files:", error);
+      res.status(500).send("Failed to move files");
+    }
+  }
+);
+
+router.get(
+  "/servers/:id/files/*",
+  authenticate,
+  findServer,
+  async (req, res) => {
+    try {
+      const decodedPath = decodePath(req.params[0] || "");
+      const items = await listDirectory(req.server.path, decodedPath);
+      res.json(items);
+    } catch (error) {
+      if (error.message === "Invalid path" || error.message === "Invalid path segment") {
+        return res.status(400).send("Invalid path");
+      }
+      console.error("Failed to read directory:", error);
+      res.status(500).send("Failed to read directory");
+    }
+  }
+);
+
 router.post("/servers/:id/backup", authenticate, findServer, (req, res) => {
-  const backupPath = path.join(req.server.backupPath);
-  fs.ensureDirSync(backupPath);
-  const archive = archiver("zip", { zlib: { level: 9 } });
-  const output = fs.createWriteStream(
-    path.join(backupPath, `backup-${Date.now()}.zip`)
-  );
-  archive.on("error", function (err) {
-    res.status(500).send("Error creating backup: " + err.message);
-  });
-  archive.pipe(output);
-  //create a backupmeta file
+  const formatTimestamp = () => {
+    const now = new Date();
+    const pad = (value) => value.toString().padStart(2, "0");
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(
+      now.getDate()
+    )}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(
+      now.getSeconds()
+    )}`;
+  };
+
   const worldPath = path.join(req.server.path, "world");
   const modPath = path.join(req.server.path, "mods");
   const serverJarPath = path.join(req.server.path, "server.jar");
-  archive.directory(worldPath, "world");
-  archive.directory(modPath, "mods");
-  archive.file(serverJarPath, { name: "server.jar" });
-  archive.finalize();
-  output.on("close", function () {
-    res.send("Backup created successfully");
-  });
-});
-//delete backup
-router.delete("/servers/:id/backup", authenticate, findServer, (req, res) => {
-  const backupPath = path.normalize(
-    path.join(req.server.backupPath, req.query.backup)
-  );
-  if (!backupPath.startsWith(req.server.backupPath)) {
-    return res.status(400).send("Invalid path");
+
+  const entries = [];
+  if (fs.existsSync(worldPath)) entries.push({ sourcePath: worldPath, destName: "world" });
+  if (fs.existsSync(modPath)) entries.push({ sourcePath: modPath, destName: "mods" });
+  if (fs.existsSync(serverJarPath)) entries.push({ sourcePath: serverJarPath, destName: "server.jar" });
+
+  if (!entries.length) {
+    return res.status(400).send("Nothing to backup");
   }
-  fs.removeSync(backupPath);
-  res.send("Backup deleted successfully");
+
+  try {
+    const backupDir = path.join(req.server.backupPath);
+    const backupName = `backup-${formatTimestamp()}.zip`;
+    const { taskId, fileName, status } = startZipTask({
+      entries,
+      outputDir: backupDir,
+      fileName: backupName,
+      cleanup: false,
+      meta: {
+        scope: "backup",
+        serverId: req.params.id,
+      },
+    });
+    res.status(202).json({ taskId, backupName: fileName, status });
+  } catch (error) {
+    console.error("Failed to start backup:", error);
+    res.status(500).send("Failed to start backup");
+  }
 });
-//get backups
+
+router.get(
+  "/servers/:id/backup/status/:taskId",
+  authenticate,
+  findServer,
+  (req, res) => {
+    const task = getTaskStatus(req.params.taskId);
+    if (!task || task.type !== TASK_TYPES.ZIP || task.meta?.serverId !== req.params.id) {
+      return res.status(404).send("Task not found");
+    }
+    res.json(task);
+  }
+);
+
+router.delete("/servers/:id/backup", authenticate, findServer, (req, res) => {
+  try {
+    const target = resolveServerPath(
+      req.server.backupPath,
+      req.query.backup || ""
+    );
+    fs.removeSync(target);
+    res.send("Backup deleted successfully");
+  } catch (error) {
+    if (error.message === "Invalid path") {
+      return res.status(400).send("Invalid path");
+    }
+    console.error("Failed to delete backup:", error);
+    res.status(500).send("Failed to delete backup");
+  }
+});
+
 router.get("/servers/:id/backups", authenticate, findServer, (req, res) => {
   const backupPath = path.join(req.server.backupPath);
   fs.readdir(backupPath, (err, files) => {
@@ -295,54 +436,100 @@ router.get("/servers/:id/backups", authenticate, findServer, (req, res) => {
       console.error("Failed to read backups:", err);
       return res.status(500).send("Failed to read backups");
     }
-    const backups = files.map((file) => ({
-      name: file,
-      path: path.join(backupPath, file),
-    }));
+    const backups = files.map((file) => {
+      const filePath = path.join(backupPath, file);
+      try {
+        const stats = fs.statSync(filePath);
+        return {
+          name: file,
+          size: stats.size,
+          createdAt: stats.mtime.toISOString(),
+        };
+      } catch (statError) {
+        console.error("Failed to stat backup:", statError);
+        return { name: file, size: 0, createdAt: new Date().toISOString() };
+      }
+    });
     res.json(backups);
   });
 });
-//restore backup
+
 router.post(
   "/servers/:id/backup/restore",
   authenticate,
   findServer,
   (req, res) => {
-    const backupPath = path.normalize(
-      path.join(req.server.backupPath, req.body.backupName)
-    );
-    if (!backupPath.startsWith(req.server.backupPath)) {
-      return res.status(400).send("Invalid path");
-    }
-    if (!fs.existsSync(backupPath)) {
-      return res.status(400).send("Backup not found");
-    }
+    try {
+      const backupPath = resolveServerPath(
+        req.server.backupPath,
+        req.body.backupName || ""
+      );
+      if (!fs.existsSync(backupPath)) {
+        return res.status(400).send("Backup not found");
+      }
 
-    const serverJarPath = path.join(req.server.path, "server.jar");
-    const worldPath = path.join(req.server.path, "world");
-    const modsPath = path.join(req.server.path, "mods");
+      const serverJarPath = path.join(req.server.path, "server.jar");
+      const worldPath = path.join(req.server.path, "world");
+      const modsPath = path.join(req.server.path, "mods");
 
-    // Clean up existing files
-    if (fs.existsSync(serverJarPath)) fs.removeSync(serverJarPath);
-    if (fs.existsSync(worldPath)) fs.removeSync(worldPath);
-    if (fs.existsSync(modsPath)) fs.removeSync(modsPath);
-    unzipWithYauzl(backupPath, req.server.path, res);
+      if (fs.existsSync(serverJarPath)) fs.removeSync(serverJarPath);
+      if (fs.existsSync(worldPath)) fs.removeSync(worldPath);
+      if (fs.existsSync(modsPath)) fs.removeSync(modsPath);
+
+      const { taskId, status } = startUnzipTask({
+        archivePath: backupPath,
+        destination: req.server.path,
+        overwrite: true,
+        meta: {
+        scope: "backup-restore",
+        serverId: req.params.id,
+        },
+      });
+      res.status(202).json({ taskId, status });
+    } catch (error) {
+      if (error.message === "Invalid path") {
+        return res.status(400).send("Invalid path");
+      }
+      console.error("Failed to restore backup:", error);
+      res.status(500).send("Failed to restore backup");
+    }
   }
 );
-//download backup
+
+router.get(
+  "/servers/:id/backup/restore/status/:taskId",
+  authenticate,
+  findServer,
+  (req, res) => {
+    const task = getTaskStatus(req.params.taskId);
+    if (!task || task.type !== TASK_TYPES.UNZIP || task.meta?.serverId !== req.params.id) {
+      return res.status(404).send("Task not found");
+    }
+    res.json(task);
+  }
+);
+
 router.get(
   "/servers/:id/backup/download",
   authenticate,
   findServer,
   (req, res) => {
-    const backupPath = path.normalize(
-      path.join(req.server.backupPath, req.query.backup)
-    );
-    if (!backupPath.startsWith(req.server.backupPath)) {
-      return res.status(400).send("Invalid path");
+    try {
+      const backupPath = resolveServerPath(
+        req.server.backupPath,
+        req.query.backup || ""
+      );
+      if (!fs.existsSync(backupPath)) {
+        return res.status(400).send("Backup not found");
+      }
+      res.download(backupPath);
+    } catch (error) {
+      if (error.message === "Invalid path") {
+        return res.status(400).send("Invalid path");
+      }
+      console.error("Failed to download backup:", error);
+      res.status(500).send("Failed to download backup");
     }
-    if (fs.existsSync(backupPath)) res.download(backupPath);
-    else return res.status(400).send("Backup not found");
   }
 );
 
