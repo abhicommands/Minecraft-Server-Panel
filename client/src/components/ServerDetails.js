@@ -13,10 +13,13 @@ import {
   Box,
   Button,
   Container,
+  CircularProgress,
   Dialog,
   DialogTitle,
   DialogContent,
   DialogActions,
+  Alert,
+  Snackbar,
   TextField,
   Typography,
 } from "@mui/material";
@@ -33,6 +36,12 @@ function ServerDetails() {
   const [minecraftVersion, setMinecraftVersion] = useState("");
   const [tabValue, setTabValue] = useState(0);
   const [openDialog, setOpenDialog] = useState(false);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [feedback, setFeedback] = useState({
+    open: false,
+    message: "",
+    severity: "success",
+  });
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -91,6 +100,7 @@ function ServerDetails() {
   };
 
   const handleOpenDialog = () => {
+    setMinecraftVersion("");
     setOpenDialog(true);
   };
 
@@ -103,22 +113,48 @@ function ServerDetails() {
   };
 
   const handleUpdateSubmit = async () => {
-    if (!minecraftVersion) {
-      alert("Please enter a Minecraft version");
+    const trimmedVersion = minecraftVersion.trim();
+    if (!trimmedVersion) {
+      setFeedback({
+        open: true,
+        message: "Please enter a Minecraft version.",
+        severity: "warning",
+      });
       return;
     }
+
+    setIsUpdating(true);
+
     try {
       await axios.post(
         `${API_URL}/servers/${id}/update`,
-        { version: minecraftVersion },
+        { version: trimmedVersion },
         { withCredentials: true }
       );
-      alert("Server updated successfully!");
+      setFeedback({
+        open: true,
+        message: "Server updated successfully!",
+        severity: "success",
+      });
+      setMinecraftVersion("");
       handleCloseDialog();
     } catch (err) {
       console.error("Failed to update server:", err);
-      alert("Failed to update server!");
+      setFeedback({
+        open: true,
+        message: "Failed to update server. Please try again.",
+        severity: "error",
+      });
+    } finally {
+      setIsUpdating(false);
     }
+  };
+
+  const handleFeedbackClose = (_, reason) => {
+    if (reason === "clickaway") {
+      return;
+    }
+    setFeedback((prev) => ({ ...prev, open: false }));
   };
 
   return (
@@ -184,10 +220,32 @@ function ServerDetails() {
               />
             </DialogContent>
             <DialogActions>
-              <Button onClick={handleCloseDialog}>Cancel</Button>
-              <Button onClick={handleUpdateSubmit}>Update</Button>
+              <Button onClick={handleCloseDialog} disabled={isUpdating}>
+                Cancel
+              </Button>
+              <Button onClick={handleUpdateSubmit} disabled={isUpdating}>
+                {isUpdating ? (
+                  <CircularProgress size={24} color="inherit" />
+                ) : (
+                  "Update"
+                )}
+              </Button>
             </DialogActions>
           </Dialog>
+          <Snackbar
+            open={feedback.open}
+            autoHideDuration={4000}
+            onClose={handleFeedbackClose}
+            anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+          >
+            <Alert
+              onClose={handleFeedbackClose}
+              severity={feedback.severity}
+              sx={{ width: "100%" }}
+            >
+              {feedback.message}
+            </Alert>
+          </Snackbar>
         </>
       )}
     </Container>

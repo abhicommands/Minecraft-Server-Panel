@@ -13,6 +13,7 @@
     "archiver": "^7.0.1",
     "axios": "^1.7.7",
     "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^12.4.1",
     "cookie": "^1.0.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -26,7 +27,6 @@
     "node-stream-zip": "^1.15.0",
     "read-last-lines": "^1.8.0",
     "socket.io": "^4.8.1",
-    "sqlite3": "^5.1.7",
     "tree-kill": "^1.2.2",
     "uuid": "^11.0.3"
   }
