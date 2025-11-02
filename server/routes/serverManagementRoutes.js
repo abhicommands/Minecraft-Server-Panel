@@ -8,7 +8,11 @@ const os = require("os");
 const kill = require("tree-kill");
 const Joi = require("joi");
 const { v4: uuidv4, validate } = require("uuid");
-const { createTerminal, initializeTerminal } = require("../utils/terminal");
+const {
+  createTerminal,
+  initializeTerminal,
+  composeStartupCommand,
+} = require("../utils/terminal");
 
 const SERVERS_BASE_PATH = path.join(__dirname, "../server-directory");
 
@@ -24,8 +28,8 @@ const serverCreateSchema = Joi.object({
   serverType: Joi.string()
     .valid("vanilla", "paper", "fabric", "forge", "bungeecord")
     .required(),
-  mshConfig: Joi.boolean().required(),
   renderDistance: Joi.number().integer().min(2).max(32).required(),
+  startupFlags: Joi.string().allow("").max(600).optional(),
 });
 
 const serverUpdateSchema = Joi.object({
@@ -39,6 +43,38 @@ const serverUpdateSchema = Joi.object({
       "any.required": "version is required.",
     }),
 });
+
+const MAX_STARTUP_FLAGS_LENGTH = 600;
+const DISALLOWED_FLAGS_PATTERN = /[;&|<>`$]/;
+
+const sanitizeStartupFlags = (value) =>
+  typeof value === "string" ? value.trim() : "";
+
+const normalizeBaseCommand = (value) =>
+  typeof value === "string" ? value.trim() : "";
+
+const ensureValidStartupFlags = (rawFlags) => {
+  const flags = sanitizeStartupFlags(rawFlags);
+  if (!flags) return "";
+  if (flags.length > MAX_STARTUP_FLAGS_LENGTH) {
+    throw new Error("Flags are too long");
+  }
+  if (DISALLOWED_FLAGS_PATTERN.test(flags) || /\r|\n/.test(flags)) {
+    throw new Error(
+      "Flags contain unsupported characters like shell separators"
+    );
+  }
+  if (/-jar\b/i.test(flags) || /\bserver\.jar\b/i.test(flags)) {
+    throw new Error("Flags cannot modify the server jar configuration");
+  }
+  if (/\b-Xmx/i.test(flags) || /\b-Xms/i.test(flags)) {
+    throw new Error("Flags cannot change the allocated memory");
+  }
+  if (/^java\b/i.test(flags)) {
+    throw new Error("Flags cannot override the java executable");
+  }
+  return flags;
+};
 
 const downloadFile = async (url, dest) => {
   const response = await axios({
@@ -67,37 +103,6 @@ const downloadServerJar = async (version, serverRoot) => {
   await downloadFile(fabricUrl, jarPath);
 };
 
-const downloadMsh = async (serverRoot, port, version) => {
-  const isWindows = process.platform === "win32";
-  const isLinux = process.platform === "linux";
-  const isArm = process.arch === "arm64";
-  const isX64 = process.arch === "x64";
-
-  const mshUrl = isWindows
-    ? "https://msh.gekware.net/builds/egg/msh-windows-amd64.exe"
-    : isLinux && isX64
-    ? "https://msh.gekware.net/builds/egg/msh-linux-amd64.bin"
-    : isLinux && isArm
-    ? "https://msh.gekware.net/builds/egg/msh-linux-arm64.bin"
-    : isLinux
-    ? "https://msh.gekware.net/builds/egg/msh-linux-arm.bin"
-    : isArm
-    ? "https://msh.gekware.net/builds/egg/msh-darwin-arm64.osx"
-    : "https://msh.gekware.net/builds/egg/msh-darwin-amd64.osx";
-  const mshPath = path.join(
-    serverRoot,
-    isWindows ? "msh_server.exe" : isLinux ? "msh_server.bin" : "msh_server.osx"
-  );
-  const startupCommand = isWindows
-    ? `./msh_server.exe -port ${port} -version ${version}`
-    : isLinux
-    ? `./msh_server.bin -port ${port} -version ${version}`
-    : `./msh_server.osx -port ${port} -version ${version}`;
-  await downloadFile(mshUrl, mshPath);
-  fs.chmodSync(mshPath, 0o755);
-  return startupCommand;
-};
-
 const createServerRoutes = (terminals, io) => {
   const router = express.Router();
   router.post("/servers", authenticate, async (req, res) => {
@@ -113,15 +118,14 @@ const createServerRoutes = (terminals, io) => {
     const serverPath = path.join(SERVERS_BASE_PATH, serverId);
     const serverRoot = path.join(serverPath, "root");
     let startupCommand;
-    if (value.mshConfig) {
-      try {
-        startupCommand = await downloadMsh(serverPath, port, version);
-      } catch (error) {
-        console.error("Error downloading files:", error);
-      }
-    } else {
-      startupCommand = `java -Xms${value.memory}G -Xmx${value.memory}G -XX:+AlwaysPreTouch -XX:+DisableExplicitGC -XX:+ParallelRefProcEnabled -XX:+PerfDisableSharedMem -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:G1HeapRegionSize=8M -XX:G1HeapWastePercent=5 -XX:G1MaxNewSizePercent=40 -XX:G1MixedGCCountTarget=4 -XX:G1MixedGCLiveThresholdPercent=90 -XX:G1NewSizePercent=30 -XX:G1RSetUpdatingPauseTimePercent=5 -XX:G1ReservePercent=20 -XX:InitiatingHeapOccupancyPercent=15 -XX:MaxGCPauseMillis=200 -XX:MaxTenuringThreshold=1 -XX:SurvivorRatio=32 -Dusing.aikars.flags=https://mcflags.emc.gs -Daikars.new.flags=true -jar server.jar nogui`;
+    let startupFlags = "";
+    try {
+      startupFlags = ensureValidStartupFlags(value.startupFlags);
+    } catch (error) {
+      return res.status(400).send(error.message);
     }
+    const memoryFlagString = `-Xmx${value.memory}G -Xms${value.memory}G`;
+    startupCommand = `java ${memoryFlagString} -jar server.jar nogui`;
     const backupPath = path.join(serverPath, "backup");
     fs.ensureDirSync(serverPath);
     fs.ensureDirSync(serverRoot);
@@ -131,17 +135,17 @@ const createServerRoutes = (terminals, io) => {
     try {
       await new Promise((resolve, reject) => {
         db.run(
-          "INSERT INTO servers (uuid, name, path, backupPath, startupCommand, version, port, serverType, mshConfig) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          "INSERT INTO servers (uuid, name, path, backupPath, startupCommand, startupFlags, version, port, serverType) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
           [
             serverId,
             name,
             serverRoot,
             backupPath,
             startupCommand,
+            startupFlags,
             version,
             port,
             serverType,
-            value.mshConfig,
           ],
           function (err) {
             if (err) {
@@ -186,51 +190,7 @@ const createServerRoutes = (terminals, io) => {
       //write the port to the server.properties file
       const propertiesPath = path.join(serverRoot, "server.properties");
       fs.ensureFileSync(propertiesPath);
-      let minecraftPort;
-      if (value.mshConfig) {
-        const mshConfPath = path.join(serverPath, "msh-config.json");
-        fs.ensureFileSync(mshConfPath);
-        const mshStartParam = `-Xmx${value.memory}G -Xms${value.memory}G`;
-        minecraftPort = parseInt(port, 10) + 1;
-        const mshConf = {
-          Server: {
-            Folder: "./root/",
-            FileName: "server.jar",
-            Version: version,
-            Protocol: 766,
-          },
-          Commands: {
-            StartServer:
-              "java <Commands.StartServerParam> -jar <Server.FileName> nogui",
-            StartServerParam: mshStartParam,
-            StopServer: "stop",
-            StopServerAllowKill: 60,
-          },
-          Msh: {
-            Debug: 2,
-            ID: "",
-            MshPort: 0,
-            MshPortQuery: 0,
-            EnableQuery: true,
-            TimeBeforeStoppingEmptyServer: 1000,
-            SuspendAllow: false,
-            SuspendRefresh: -1,
-            InfoHibernation:
-              "                   §fserver status:\n                   §b§lHIBERNATING",
-            InfoStarting:
-              "                   §fserver status:\n                    §6§lWARMING UP",
-            NotifyUpdate: true,
-            NotifyMessage: true,
-            Whitelist: [],
-            WhitelistImport: false,
-            ShowResourceUsage: false,
-            ShowInternetUsage: false,
-          },
-        };
-        fs.writeFileSync(mshConfPath, JSON.stringify(mshConf, null, 2));
-      } else {
-        minecraftPort = port;
-      }
+      const minecraftPort = port;
       const propertiesContent = `
 #Minecraft server properties
 #Thu May 16 21:56:35 EDT 2024
@@ -303,7 +263,7 @@ white-list=false
 eula=true
 `;
       fs.writeFileSync(eulaPath, eulaContent);
-      const terminal = createTerminal(logDir, startupCommand, value.mshConfig);
+      const terminal = createTerminal(logDir, startupCommand, startupFlags);
       terminals[serverId] = terminal;
       initializeTerminal(io, serverId, terminal, logDir);
       return res.json({
@@ -380,9 +340,75 @@ eula=true
       ]);
       const terminal = terminals[req.server.uuid];
       if (terminal) {
-        terminal.startupCommand = req.server.startupCommand;
+        terminal.baseCommand = req.server.startupCommand;
+        terminal.startupFlags =
+          typeof req.server.startupFlags === "string"
+            ? req.server.startupFlags
+            : terminal.startupFlags;
+        terminal.startupCommand = composeStartupCommand(
+          terminal.baseCommand,
+          terminal.startupFlags
+        );
       }
       res.send("Server updated successfully");
+    }
+  );
+
+  router.get(
+    "/servers/:id/startup-flags",
+    authenticate,
+    findServer,
+    (req, res) => {
+      const baseCommand = normalizeBaseCommand(req.server.startupCommand);
+      const flags = sanitizeStartupFlags(req.server.startupFlags);
+      res.json({
+        baseCommand,
+        startupFlags: flags,
+        effectiveCommand: composeStartupCommand(baseCommand, flags),
+        allowCustomFlags: true,
+        requiresRestart: true,
+      });
+    }
+  );
+
+  router.put(
+    "/servers/:id/startup-flags",
+    authenticate,
+    findServer,
+    (req, res) => {
+      const baseCommand = normalizeBaseCommand(req.server.startupCommand);
+      let flags;
+      try {
+        flags = ensureValidStartupFlags(req.body.flags);
+      } catch (error) {
+        return res.status(400).send(error.message);
+      }
+      db.run(
+        "UPDATE servers SET startupFlags = ? WHERE uuid = ?",
+        [flags, req.server.uuid],
+        (err) => {
+          if (err) {
+            console.error("Failed to update startup flags:", err);
+            return res.status(500).send("Failed to update startup flags");
+          }
+          req.server.startupFlags = flags;
+          const terminal = terminals[req.server.uuid];
+          if (terminal) {
+            terminal.startupFlags = flags;
+            terminal.startupCommand = composeStartupCommand(
+              normalizeBaseCommand(terminal.baseCommand || baseCommand),
+              flags
+            );
+          }
+          res.json({
+            baseCommand,
+            startupFlags: flags,
+            effectiveCommand: composeStartupCommand(baseCommand, flags),
+            allowCustomFlags: true,
+            requiresRestart: true,
+          });
+        }
+      );
     }
   );
 

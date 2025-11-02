@@ -27,12 +27,21 @@ const runSchemaMigrations = () => {
         startupCommand TEXT,
         version TEXT,
         port INTEGER UNIQUE,
-        serverType TEXT,
-        mshConfig BOOLEAN
+        serverType TEXT
       );`
     );
   } catch (error) {
     console.error("Error creating servers table", error.message);
+  }
+
+  try {
+    nativeDb.exec(
+      "ALTER TABLE servers ADD COLUMN startupFlags TEXT DEFAULT '';"
+    );
+  } catch (error) {
+    if (!/duplicate column name/i.test(error.message)) {
+      console.error("Error adding startupFlags column", error.message);
+    }
   }
 
   try {

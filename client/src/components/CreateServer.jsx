@@ -6,11 +6,9 @@ import {
   Card,
   CircularProgress,
   FormControl,
-  FormControlLabel,
   InputLabel,
   MenuItem,
   Select,
-  Switch,
   TextField,
   Typography,
 } from "@mui/material";
@@ -31,8 +29,8 @@ const CreateMinecraftServer = () => {
   const [port, setPort] = useState(25565); // default Minecraft port
   const [loading, setLoading] = useState(false);
   const [serverType, setServerType] = useState("vanilla");
-  const [mshConfig, setMshConfig] = useState(false);
   const [renderDistance, setRenderDistance] = useState(10);
+  const [startupFlags, setStartupFlags] = useState("");
 
   // validate session
   useEffect(() => {
@@ -61,10 +59,6 @@ const CreateMinecraftServer = () => {
 
   const handleServerTypeChange = (e) => {
     setServerType(e.target.value);
-  };
-
-  const handleMshConfigChange = (e) => {
-    setMshConfig(e.target.checked);
   };
 
   const handleRenderDistanceChange = (e) => {
@@ -96,8 +90,8 @@ const CreateMinecraftServer = () => {
           version: minecraftVersion,
           port: port,
           serverType: serverType,
-          mshConfig: mshConfig,
           renderDistance: renderDistance,
+          startupFlags,
         },
         { withCredentials: true }
       )
@@ -184,15 +178,16 @@ const CreateMinecraftServer = () => {
                   <MenuItem value="bungeecord">BungeeCord</MenuItem>
                 </Select>
               </FormControl>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={mshConfig}
-                    onChange={handleMshConfigChange}
-                    disabled={loading}
-                  />
-                }
-                label="Enable MSH Config"
+              <TextField
+                label="Startup Flags"
+                value={startupFlags}
+                onChange={(e) => setStartupFlags(e.target.value)}
+                fullWidth
+                multiline
+                minRows={2}
+                maxRows={4}
+                disabled={loading}
+                helperText="Optional JVM flags appended before -jar (e.g., -XX:+UseG1GC)."
               />
               <TextField
                 label="Render Distance"

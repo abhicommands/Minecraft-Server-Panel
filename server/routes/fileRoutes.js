@@ -32,9 +32,12 @@ const decodePath = (raw = "") =>
     .join("/");
 
 const resolveServerPath = (basePath, relativePath = "") => {
+  const baseResolved = path.resolve(basePath);
   const normalizedRelative = normalizeRelativePath(relativePath);
-  const absolutePath = path.normalize(path.join(basePath, normalizedRelative));
-  if (!absolutePath.startsWith(basePath)) {
+  const target = normalizedRelative ? normalizedRelative : ".";
+  const absolutePath = path.resolve(baseResolved, target);
+  const relativeToBase = path.relative(baseResolved, absolutePath);
+  if (relativeToBase.startsWith("..") || path.isAbsolute(relativeToBase)) {
     throw new Error("Invalid path");
   }
   return absolutePath;
@@ -52,6 +55,26 @@ const listDirectory = async (basePath, relativePath = "") => {
 
 const storage = multer.diskStorage({
   destination(req, file, cb) {
+    const handleServer = (server) => {
+      if (!server) {
+        return cb(new Error("Server not found"));
+      }
+      try {
+        const uploadPath = resolveServerPath(
+          server.path,
+          req.query.path || ""
+        );
+        fs.ensureDirSync(uploadPath);
+        cb(null, uploadPath);
+      } catch (error) {
+        cb(new Error("Invalid path"));
+      }
+    };
+
+    if (req.server) {
+      return handleServer(req.server);
+    }
+
     const serverId = req.params.id;
     db.get(
       "SELECT * FROM servers WHERE uuid = ?",
@@ -60,19 +83,7 @@ const storage = multer.diskStorage({
         if (err) {
           return cb(new Error("Server lookup failed"));
         }
-        if (!server) {
-          return cb(new Error("Server not found"));
-        }
-        try {
-          const uploadPath = resolveServerPath(
-            server.path,
-            req.query.path || ""
-          );
-          fs.ensureDirSync(uploadPath);
-          cb(null, uploadPath);
-        } catch (error) {
-          cb(new Error("Invalid path"));
-        }
+        handleServer(server);
       }
     );
   },
@@ -82,13 +93,23 @@ const storage = multer.diskStorage({
 });
 
 const upload = multer({ storage });
+const uploadFilesMiddleware = upload.array("files");
 
 router.post(
   "/servers/:id/upload",
   authenticate,
-  upload.array("files"),
+  findServer,
   (req, res) => {
-    res.send("Files uploaded successfully");
+    uploadFilesMiddleware(req, res, (error) => {
+      if (error) {
+        if (error instanceof multer.MulterError) {
+          return res.status(400).send(error.message);
+        }
+        console.error("Failed to upload files:", error);
+        return res.status(500).send("Failed to upload files");
+      }
+      res.send("Files uploaded successfully");
+    });
   }
 );
 

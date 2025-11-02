@@ -13,7 +13,11 @@ const socket = require("socket.io");
 const http = require("http");
 const cookie = require("cookie");
 const kill = require("tree-kill");
-const { createTerminal, initializeTerminal } = require("./utils/terminal");
+const {
+  createTerminal,
+  initializeTerminal,
+  composeStartupCommand,
+} = require("./utils/terminal");
 
 let terminals = {};
 const SERVERS_BASE_PATH = path.join(__dirname, "./server-directory");
@@ -53,7 +57,7 @@ io.use((socket, next) => {
     }
     socket.user = user;
     db.get(
-      "SELECT path, startupCommand, mshConfig FROM servers WHERE uuid = ?",
+      "SELECT path, startupCommand, startupFlags FROM servers WHERE uuid = ?",
       [serverId],
       (err, row) => {
         if (err || !row) {
@@ -65,13 +69,20 @@ io.use((socket, next) => {
           terminals[serverId] = createTerminal(
             path.join(row.path, "../logs"),
             row.startupCommand,
-            row.mshConfig
+            row.startupFlags
           );
           initializeTerminal(
             io,
             serverId,
             terminals[serverId],
             path.join(row.path, "../logs")
+          );
+        } else {
+          terminals[serverId].baseCommand = row.startupCommand;
+          terminals[serverId].startupFlags = row.startupFlags || "";
+          terminals[serverId].startupCommand = composeStartupCommand(
+            row.startupCommand,
+            row.startupFlags
           );
         }
         fs.ensureFileSync(logFilePath);
@@ -98,23 +109,14 @@ io.on("connection", (socket) => {
   });
   socket.on("startServer", () => {
     if (terminal && !terminal.isServerRunning) {
-      if (terminal.isMsh) {
-        fs.ensureFileSync(
-          path.join(SERVERS_BASE_PATH, socket.serverId, "./minecraft_pid.txt")
-        );
-        terminal.ptyProcess.write(
-          `${terminal.startupCommand} & echo $! > ./minecraft_pid.txt; fg\n`
-        );
-        setTimeout(() => {
-          terminal.ptyProcess.write("msh start\n");
-        }, 1700);
-      } else {
-        terminal.ptyProcess.write(
-          `${terminal.startupCommand} & echo $! > ../minecraft_pid.txt; fg\n`
-        );
-      }
-    } else if (terminal && terminal.isServerRunning && terminal.isMsh) {
-      terminal.ptyProcess.write("msh start\n");
+      const commandToRun = composeStartupCommand(
+        terminal.baseCommand || terminal.startupCommand,
+        terminal.startupFlags || ""
+      );
+      terminal.startupCommand = commandToRun;
+      terminal.ptyProcess.write(
+        `${commandToRun} & echo $! > ../minecraft_pid.txt; fg\n`
+      );
     } else {
       socket.emit(
         "output",
@@ -123,12 +125,7 @@ io.on("connection", (socket) => {
     }
   });
   socket.on("stopServer", () => {
-    if (terminal && terminal.isServerRunning && terminal.isMsh) {
-      terminal.ptyProcess.write("msh exit\n");
-      fs.removeSync(
-        path.join(SERVERS_BASE_PATH, socket.serverId, "./minecraft_pid.txt")
-      );
-    } else if (terminal && !terminal.isMsh && terminal.isServerRunning) {
+    if (terminal && terminal.isServerRunning) {
       terminal.ptyProcess.write("stop\n");
     } else {
       socket.emit(

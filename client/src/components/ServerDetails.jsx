@@ -27,6 +27,7 @@ import FileManager from "./FileManager";
 import ServerConsole from "./ServerConsole";
 import ServerBackup from "./ServerBackup";
 import EditFile from "./EditFile";
+import ServerStartup from "./ServerStartup";
 import axios from "axios";
 import { API_URL } from "../config";
 
@@ -82,6 +83,9 @@ function ServerDetails() {
         navigate(`/server/${id}/files`);
         break;
       case 2:
+        navigate(`/server/${id}/startup`);
+        break;
+      case 3:
         navigate(`/server/${id}/backup`);
         break;
       default:
@@ -90,10 +94,12 @@ function ServerDetails() {
   };
 
   const setTabValueBasedOnPath = (pathname) => {
-    if (pathname.includes(`/files`)) {
-      setTabValue(1);
-    } else if (pathname.includes(`/backup`)) {
+    if (pathname.includes(`/startup`)) {
       setTabValue(2);
+    } else if (pathname.includes(`/backup`)) {
+      setTabValue(3);
+    } else if (pathname.includes(`/files`)) {
+      setTabValue(1);
     } else {
       setTabValue(0);
     }
@@ -178,6 +184,10 @@ function ServerDetails() {
                   disabled={location.pathname === `/server/${id}/files`}
                 />
                 <Tab
+                  label="Startup"
+                  disabled={location.pathname === `/server/${id}/startup`}
+                />
+                <Tab
                   label="Backup"
                   disabled={location.pathname === `/server/${id}/backup`}
                 />
@@ -200,6 +210,7 @@ function ServerDetails() {
           <Routes>
             <Route path="files/*" element={<FileManager />} />
             <Route path="files/edit/:encodedPath" element={<EditFile />} />
+            <Route path="startup" element={<ServerStartup />} />
             <Route path="backup" element={<ServerBackup />} />
             <Route path="/" element={<ServerConsole />} />
             <Route
