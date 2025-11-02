@@ -8,10 +8,10 @@ This is a nodejs Minecraft server panel, created in the front end using react, a
 
 In the `client` directory, you can run:
 
-#### `npm start`
+#### `npm run dev`
 
 Runs the React app in development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.\
+Open [http://localhost:3000](http://localhost:5173) to view it in your browser.\
 The page will reload when you make changes. You may also see any lint errors in the console.
 
 ## Environment Variables
@@ -21,9 +21,9 @@ The page will reload when you make changes. You may also see any lint errors in 
 Create a `.env` file inside the `client` directory with the following content (example for development if the backend is running on port 3001):
 
 ```plaintext
-REACT_APP_API_URL=http://localhost:3001
-REACT_APP_SOCKET_URL=http://localhost:3001
-REACT_APP_SOCKET_PATH=/socket.io
+VITE_API_URL=http://localhost:3001
+VITE_SOCKET_URL=http://localhost:3001
+VITE_SOCKET_PATH=/socket.io
 ```
 
 ### Backend
@@ -35,7 +35,7 @@ ROOT_USERNAME=sample_username
 ROOT_PASSWORD_HASH="hashed password"
 JWT_SECRET=your_jwt_secret
 PORT=3001
-CORSORIGIN=http://localhost:3000
+CORSORIGIN=http://localhost:5173
 SECURE_STATUS=true
 ```
 

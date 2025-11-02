@@ -8,7 +8,11 @@
 # testing
 /coverage
 
+# production
+/releases
+
 .env
+.env.*
 hash.js
 node_modules/
 myServers.db
