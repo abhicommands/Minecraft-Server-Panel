@@ -6,7 +6,6 @@ import {
   Box,
   Button,
   CircularProgress,
-  Paper,
   Stack,
   TextField,
   Typography,
@@ -151,18 +150,15 @@ const ServerStartup = () => {
         <Typography variant="subtitle1" gutterBottom>
           Base Command (read-only)
         </Typography>
-        <Paper
-          elevation={1}
-          sx={{
-            p: 2,
-            bgcolor: "background.default",
-            fontFamily: "monospace",
-            wordBreak: "break-word",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {baseCommand || "Not configured."}
-        </Paper>
+        <TextField
+          value={baseCommand || ""}
+          fullWidth
+          multiline
+          minRows={2}
+          maxRows={4}
+          InputProps={{ readOnly: true }}
+          placeholder="Not configured"
+        />
       </Box>
       <Box>
         <Typography variant="subtitle1" gutterBottom>
@@ -191,18 +187,15 @@ const ServerStartup = () => {
         <Typography variant="subtitle1" gutterBottom>
           Effective Command
         </Typography>
-        <Paper
-          elevation={1}
-          sx={{
-            p: 2,
-            bgcolor: "background.default",
-            fontFamily: "monospace",
-            wordBreak: "break-word",
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          {effectiveCommand || "Not configured."}
-        </Paper>
+        <TextField
+          value={effectiveCommand || ""}
+          fullWidth
+          multiline
+          minRows={2}
+          maxRows={4}
+          InputProps={{ readOnly: true }}
+          placeholder="Not configured"
+        />
       </Box>
       <Stack direction="row" spacing={2}>
         {isDirty && allowCustomFlags && (

@@ -25,6 +25,7 @@ const runSchemaMigrations = () => {
         path TEXT,
         backupPath TEXT,
         startupCommand TEXT,
+        startupFlags TEXT DEFAULT '',
         version TEXT,
         port INTEGER UNIQUE,
         serverType TEXT

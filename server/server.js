@@ -28,7 +28,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(
   cors({
     origin: process.env.CORSORIGIN,
-    methods: ["GET", "POST", "DELETE"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   })
 );
@@ -37,7 +37,7 @@ const server = http.createServer(app);
 const io = socket(server, {
   cors: {
     origin: process.env.CORSORIGIN,
-    methods: ["GET", "POST", "DELETE"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true, // Important for sending cookies and headers
   },
 });

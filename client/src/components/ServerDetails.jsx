@@ -59,8 +59,11 @@ function ServerDetails() {
 
   useEffect(() => {
     checkIfServerExists();
+  }, [checkIfServerExists]);
+
+  useEffect(() => {
     setTabValueBasedOnPath(location.pathname);
-  }, [checkIfServerExists, location.pathname]);
+  }, [location.pathname]);
 
   const deleteServer = async () => {
     try {
