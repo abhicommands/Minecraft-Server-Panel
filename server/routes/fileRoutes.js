@@ -228,10 +228,7 @@ router.post(
       );
       const destination = req.body.destination
         ? resolveServerPath(req.server.path, req.body.destination)
-        : path.join(
-            path.dirname(archivePath),
-            path.basename(archivePath, path.extname(archivePath))
-          );
+        : path.dirname(archivePath);
       const { taskId, status } = startUnzipTask({
         archivePath,
         destination,

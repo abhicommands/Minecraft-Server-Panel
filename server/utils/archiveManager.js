@@ -221,8 +221,13 @@ const startUnzipTask = ({
   process.nextTick(async () => {
     const zip = new StreamZip.async({ file: archivePath });
     try {
-      await fs.ensureDir(destination);
-      console.log(`[ArchiveManager] unzip task ${task.id} started`);
+      const destinationRoot = path.resolve(destination);
+      const destinationBase = path.basename(destinationRoot);
+      const destinationBaseLower = destinationBase
+        ? destinationBase.toLowerCase()
+        : "";
+
+      await fs.ensureDir(destinationRoot);
       const entries = await zip.entries();
       const entryList = Object.values(entries);
       const totalBytes = entryList.reduce(
@@ -240,9 +245,32 @@ const startUnzipTask = ({
       let processedEntries = 0;
 
       for (const entry of entryList) {
-        const entryName = entry.name;
-        const targetPath = path.join(destination, entryName);
-        if (!targetPath.startsWith(destination)) {
+        const entryName = entry.name || "";
+        const normalizedName = entryName.replace(/\\/g, "/");
+        const segments = normalizedName.split("/").filter(Boolean);
+
+        if (
+          segments.length &&
+          destinationBase &&
+          segments[0].toLowerCase() === destinationBaseLower
+        ) {
+          segments.shift();
+        }
+
+        const relativeEntryPath = segments.join(path.sep);
+        const targetPath =
+          relativeEntryPath.length === 0
+            ? destinationRoot
+            : path.resolve(destinationRoot, relativeEntryPath);
+
+        const relativeToDestination = path.relative(
+          destinationRoot,
+          targetPath
+        );
+        if (
+          relativeToDestination.startsWith("..") ||
+          path.isAbsolute(relativeToDestination)
+        ) {
           console.warn(
             `[ArchiveManager] skipping entry outside destination: ${entryName}`
           );
@@ -293,7 +321,6 @@ const startUnzipTask = ({
         entriesProcessed: processedEntries,
         finishedAt: newTimestamp(),
       });
-      console.log(`[ArchiveManager] unzip task ${task.id} completed`);
     } catch (error) {
       console.error("Unzip task failed:", error);
       updateTask(task.id, {
