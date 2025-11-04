@@ -46,6 +46,48 @@ const updateTask = (id, updates) => {
   Object.assign(task, updates, { updatedAt: newTimestamp() });
 };
 
+const registerExistingZipTask = async ({
+  sourcePath,
+  fileName,
+  meta = {},
+}) => {
+  const resolvedSource = path.resolve(sourcePath);
+  const exists = await fs.pathExists(resolvedSource);
+  if (!exists) {
+    throw new Error("Zip file not found");
+  }
+  const stats = await fs.stat(resolvedSource);
+  if (!stats.isFile()) {
+    throw new Error("Selected path is not a file");
+  }
+
+  const taskFileName = fileName || path.basename(resolvedSource);
+  const task = createTask(TASK_TYPES.ZIP, {
+    fileName: taskFileName,
+    outputPath: resolvedSource,
+    cleanup: false,
+    meta,
+  });
+
+  updateTask(task.id, {
+    status: TASK_STATUS.COMPLETED,
+    progress: 1,
+    totalBytes: stats.size,
+    processedBytes: stats.size,
+    entriesTotal: 1,
+    entriesProcessed: 1,
+    archiveSize: stats.size,
+    finishedAt: newTimestamp(),
+  });
+
+  return {
+    taskId: task.id,
+    fileName: taskFileName,
+    status: task.status,
+    outputPath: resolvedSource,
+  };
+};
+
 const calculateTotalSize = async (targets) => {
   let total = 0;
   for (const target of targets) {
@@ -390,6 +432,7 @@ module.exports = {
   TASK_STATUS,
   TASK_TYPES,
   startZipTask,
+  registerExistingZipTask,
   startUnzipTask,
   getTaskStatus,
   streamZipResult,

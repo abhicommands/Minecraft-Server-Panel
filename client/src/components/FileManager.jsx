@@ -263,21 +263,33 @@ function FileManager() {
             setArchiveTask(null);
             setSelectedFiles([]);
             fetchFiles();
+            return false;
           } else if (data.status === "error") {
             clearArchivePolling();
             setArchiveTask(null);
             setOperationError(data.message || "Failed to archive files");
+            return false;
           }
+          return true;
         } catch (error) {
           console.error("Failed to poll archive status:", error);
           clearArchivePolling();
           setArchiveTask(null);
           setOperationError("Failed to retrieve archive status");
+          return false;
         }
       };
 
-      await pollStatus();
-      archivePollRef.current = setInterval(pollStatus, 1500);
+      const shouldContinue = await pollStatus();
+      if (shouldContinue) {
+        archivePollRef.current = setInterval(() => {
+          pollStatus().then((continuePolling) => {
+            if (!continuePolling) {
+              clearArchivePolling();
+            }
+          });
+        }, 1500);
+      }
     } catch (error) {
       console.error("Error starting archive:", error);
       setOperationError("Failed to start archive");

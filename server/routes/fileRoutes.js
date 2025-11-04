@@ -6,10 +6,10 @@ const path = require("path");
 const { db, findServer } = require("../db/db");
 const {
   startZipTask,
+  registerExistingZipTask,
   startUnzipTask,
   getTaskStatus,
   streamZipResult,
-  TASK_STATUS,
   TASK_TYPES,
 } = require("../utils/archiveManager");
 
@@ -177,13 +177,45 @@ router.post(
       return res.status(400).send("No files selected");
     }
     try {
-      const entries = relativePaths.map((relative) => {
-        const sourcePath = resolveServerPath(req.server.path, relative);
-        return {
-          sourcePath,
-          destName: normalizeRelativePath(relative) || path.basename(sourcePath),
-        };
-      });
+      const detailedEntries = await Promise.all(
+        relativePaths.map(async (relative) => {
+          const sourcePath = resolveServerPath(req.server.path, relative);
+          const stats = await fs.stat(sourcePath);
+          return {
+            sourcePath,
+            destName:
+              normalizeRelativePath(relative) || path.basename(sourcePath),
+            isFile: stats.isFile(),
+            isDirectory: stats.isDirectory(),
+            isZip:
+              stats.isFile() &&
+              path.extname(sourcePath).toLowerCase() === ".zip",
+          };
+        })
+      );
+
+      if (
+        detailedEntries.length === 1 &&
+        detailedEntries[0].isFile &&
+        detailedEntries[0].isZip
+      ) {
+        const singleZip = detailedEntries[0];
+        const { taskId, fileName, status } = await registerExistingZipTask({
+          sourcePath: singleZip.sourcePath,
+          fileName: path.basename(singleZip.sourcePath),
+          meta: {
+            scope: "files-archive",
+            serverId: req.params.id,
+            passthrough: true,
+          },
+        });
+        return res.status(202).json({ taskId, fileName, status });
+      }
+
+      const entries = detailedEntries.map((entry) => ({
+        sourcePath: entry.sourcePath,
+        destName: entry.destName,
+      }));
       const tempDir = path.join(req.server.path, "..", "tmp-archives");
       const { taskId, fileName, status } = startZipTask({
         entries,

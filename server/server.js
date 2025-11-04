@@ -20,27 +20,32 @@ const {
 } = require("./utils/terminal");
 
 let terminals = {};
-const SERVERS_BASE_PATH = path.join(__dirname, "./server-directory");
+const isProduction = process.env.NODE_ENV === "production";
+const corsOrigin = process.env.CORSORIGIN;
+const corsOptions = {
+  origin: corsOrigin || true,
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  credentials: true,
+};
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(
-  cors({
-    origin: process.env.CORSORIGIN,
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true,
-  })
-);
+if (!isProduction) {
+  app.use(cors(corsOptions));
+}
 app.use(cookieParser());
 const server = http.createServer(app);
-const io = socket(server, {
-  cors: {
-    origin: process.env.CORSORIGIN,
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    credentials: true, // Important for sending cookies and headers
-  },
-});
+const io = socket(
+  server,
+  isProduction
+    ? {}
+    : {
+        cors: {
+          ...corsOptions,
+        },
+      }
+);
 
 //authenticate io
 io.use((socket, next) => {
