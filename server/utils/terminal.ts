@@ -751,7 +751,6 @@ export class TerminalManager {
     }
 
     if (state.generation !== generation) return;
-    state.running = false;
     let residualProcessGroup = false;
     try {
       const trailing = state.decoder.decode();

@@ -106,8 +106,11 @@ jobs:
           fi
           env -u VITE_API_URL -u VITE_SOCKET_URL -u VITE_SOCKET_PATH bun run build
           test -f dist/index.html
+          # Axios intentionally carries a bare http://localhost fallback for
+          # non-browser URL parsing. Application-owned sources were checked
+          # above; only a deployable local endpoint is forbidden here.
           if grep -R -E -n --exclude='*.map' \
-            'https?://(localhost|127\.0\.0\.1)(:[0-9]+)?' dist; then
+            'https?://(localhost|127\.0\.0\.1):[0-9]+' dist; then
             echo "::error::Release frontend contains a hard-coded development URL"
             exit 1
           fi
