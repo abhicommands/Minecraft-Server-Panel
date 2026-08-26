@@ -9,8 +9,23 @@ import {
   Button,
   Stack,
   Paper,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
 } from "@mui/material";
 import { API_URL } from "../config";
+
+const apiErrorMessage = (error, fallback) => {
+  const data = error.response?.data;
+  if (typeof data === "string" && data.trim()) return data;
+  if (typeof data?.message === "string" && data.message.trim()) {
+    return data.message;
+  }
+  if (typeof data?.error === "string" && data.error.trim()) return data.error;
+  return fallback;
+};
 
 const ServerBackup = () => {
   const { id } = useParams();
@@ -19,6 +34,7 @@ const ServerBackup = () => {
   const [error, setError] = useState(null);
   const [backupTask, setBackupTask] = useState(null);
   const [restoreTask, setRestoreTask] = useState(null);
+  const [backupWarning, setBackupWarning] = useState(null);
   const backupPollRef = useRef(null);
   const restorePollRef = useRef(null);
 
@@ -46,7 +62,7 @@ const ServerBackup = () => {
       setLoading(false);
     } catch (err) {
       console.error("Failed to fetch backups:", err);
-      setError("Failed to fetch backups");
+      setError(apiErrorMessage(err, "Failed to fetch backups"));
       setLoading(false);
     }
   }, [id]);
@@ -59,13 +75,14 @@ const ServerBackup = () => {
     };
   }, [fetchBackups]);
 
-  const createBackup = async () => {
+  const createBackup = async ({ allowRunning = false } = {}) => {
     clearBackupPolling();
     try {
       setError(null);
+      setBackupWarning(null);
       const response = await axios.post(
         `${API_URL}/servers/${id}/backup`,
-        {},
+        { allowRunning },
         {
           withCredentials: true,
         }
@@ -93,24 +110,47 @@ const ServerBackup = () => {
             clearBackupPolling();
             setBackupTask(null);
             fetchBackups();
+            return false;
           } else if (data.status === "error") {
             clearBackupPolling();
             setBackupTask(null);
             setError(data.message || "Failed to create backup");
+            return false;
           }
+          return true;
         } catch (pollError) {
           console.error("Failed to poll backup status:", pollError);
           clearBackupPolling();
           setBackupTask(null);
-          setError("Failed to retrieve backup status");
+          setError(
+            apiErrorMessage(pollError, "Failed to retrieve backup status")
+          );
+          return false;
         }
       };
 
-      await pollStatus();
-      backupPollRef.current = setInterval(pollStatus, 1500);
+      const shouldContinue = await pollStatus();
+      if (shouldContinue) {
+        backupPollRef.current = setInterval(() => {
+          pollStatus().then((continuePolling) => {
+            if (!continuePolling) clearBackupPolling();
+          });
+        }, 1500);
+      }
     } catch (err) {
       console.error("Failed to create backup:", err);
-      setError("Failed to create backup");
+      const data = err.response?.data;
+      if (
+        err.response?.status === 409 &&
+        data?.code === "SERVER_RUNNING_BACKUP_WARNING" &&
+        data?.requiresConfirmation === true
+      ) {
+        setBackupWarning(
+          data.message || "The server is running. Continue with the backup?"
+        );
+      } else {
+        setError(apiErrorMessage(err, "Failed to create backup"));
+      }
     }
   };
   const formatBytes = (bytes) => {
@@ -153,7 +193,7 @@ const ServerBackup = () => {
       fetchBackups();
     } catch (err) {
       console.error("Failed to delete backup:", err);
-      setError("Failed to delete backup");
+      setError(apiErrorMessage(err, "Failed to delete backup"));
       setLoading(false);
     }
   };
@@ -191,24 +231,36 @@ const ServerBackup = () => {
           if (data.status === "completed") {
             clearRestorePolling();
             setRestoreTask(null);
+            return false;
           } else if (data.status === "error") {
             clearRestorePolling();
             setRestoreTask(null);
             setError(data.message || "Failed to restore backup");
+            return false;
           }
+          return true;
         } catch (pollError) {
           console.error("Failed to poll restore status:", pollError);
           clearRestorePolling();
           setRestoreTask(null);
-          setError("Failed to retrieve restore status");
+          setError(
+            apiErrorMessage(pollError, "Failed to retrieve restore status")
+          );
+          return false;
         }
       };
 
-      await pollStatus();
-      restorePollRef.current = setInterval(pollStatus, 1500);
+      const shouldContinue = await pollStatus();
+      if (shouldContinue) {
+        restorePollRef.current = setInterval(() => {
+          pollStatus().then((continuePolling) => {
+            if (!continuePolling) clearRestorePolling();
+          });
+        }, 1500);
+      }
     } catch (err) {
       console.error("Failed to restore backup:", err);
-      setError("Failed to restore backup");
+      setError(apiErrorMessage(err, "Failed to restore backup"));
     }
   };
 
@@ -218,7 +270,7 @@ const ServerBackup = () => {
         <Typography variant="h5">Server Backups</Typography>
         <Button
           variant="contained"
-          onClick={createBackup}
+          onClick={() => createBackup()}
           disabled={loading || Boolean(backupTask)}
         >
           Create Backup
@@ -299,6 +351,28 @@ const ServerBackup = () => {
           </Box>
         </Box>
       </Backdrop>
+      <Dialog
+        open={Boolean(backupWarning)}
+        onClose={() => setBackupWarning(null)}
+        aria-labelledby="running-backup-warning-title"
+      >
+        <DialogTitle id="running-backup-warning-title">
+          Server is still running
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>{backupWarning}</DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setBackupWarning(null)}>Cancel</Button>
+          <Button
+            color="warning"
+            variant="contained"
+            onClick={() => createBackup({ allowRunning: true })}
+          >
+            Continue Anyway
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

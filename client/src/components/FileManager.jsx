@@ -302,7 +302,7 @@ function FileManager() {
     setIsDeleting(true);
     try {
       await axios.post(
-        `${API_URL}/servers/${id}/files/delete/`,
+        `${API_URL}/servers/${id}/files/delete`,
         { files: selectedFiles },
         {
           withCredentials: true,
@@ -374,21 +374,31 @@ function FileManager() {
             clearUnarchivePolling();
             setUnarchiveTask(null);
             fetchFiles();
+            return false;
           } else if (data.status === "error") {
             clearUnarchivePolling();
             setUnarchiveTask(null);
             setOperationError(data.message || "Failed to unarchive");
+            return false;
           }
+          return true;
         } catch (error) {
           console.error("Failed to poll unarchive status:", error);
           clearUnarchivePolling();
           setUnarchiveTask(null);
           setOperationError("Failed to retrieve unarchive status");
+          return false;
         }
       };
 
-      await pollStatus();
-      unarchivePollRef.current = setInterval(pollStatus, 1500);
+      const shouldContinue = await pollStatus();
+      if (shouldContinue) {
+        unarchivePollRef.current = setInterval(() => {
+          pollStatus().then((continuePolling) => {
+            if (!continuePolling) clearUnarchivePolling();
+          });
+        }, 1500);
+      }
     } catch (error) {
       console.error("Error starting unarchive:", error);
       setOperationError("Failed to start unarchive");

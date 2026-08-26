@@ -1,0 +1,25 @@
+{
+  "name": "minecraft-server-panel",
+  "version": "3.0.0",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abhicommands/Minecraft-Server-Panel.git"
+  },
+  "type": "module",
+  "packageManager": "bun@1.4.0",
+  "engines": {
+    "bun": ">=1.4.0 <1.5.0"
+  },
+  "scripts": {
+    "setup": "bun run --no-orphans scripts/setup.ts",
+    "dev": "bun run --no-orphans scripts/dev.ts",
+    "build": "bun run --no-orphans --cwd server build",
+    "init": "bun run --no-orphans --cwd server init",
+    "check": "bun run --no-orphans --cwd server typecheck && bun run --no-orphans --cwd server test && bun run --no-orphans --cwd client lint && bun run --no-orphans --cwd client build",
+    "benchmark:archive": "bun run --no-orphans --cwd server benchmark:archive",
+    "benchmark:database": "bun run --no-orphans --cwd server benchmark:database",
+    "benchmark:runtime-comparison": "bun run --no-orphans --cwd server benchmark:runtime-comparison"
+  }
+}

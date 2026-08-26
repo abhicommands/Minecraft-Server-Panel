@@ -1,33 +1,36 @@
 {
-  "name": "server-panel",
-  "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "name": "minecraft-server-panel-server",
+  "version": "3.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "bun@1.4.0",
+  "engines": {
+    "bun": ">=1.4.0 <1.5.0"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "scripts": {
+    "start": "bun server.ts",
+    "dev": "bun --watch server.ts",
+    "init": "bun server.ts init --development",
+    "test": "bun test --parallel",
+    "typecheck": "tsc --noEmit",
+    "build": "bun build.ts",
+    "smoke:compiled": "bun tests/compiled-smoke.ts",
+    "hash-password": "bun scripts/hash-password.ts",
+    "benchmark:archive": "bun benchmarks/archive.bench.ts",
+    "benchmark:database": "bun benchmarks/database.bench.ts",
+    "benchmark:runtime-comparison": "bun benchmarks/runtime-comparison.bench.ts"
+  },
   "dependencies": {
-    "archiver": "^7.0.1",
-    "axios": "^1.7.7",
-    "bcryptjs": "^2.4.3",
-    "better-sqlite3": "^12.4.1",
-    "cookie": "^1.0.1",
-    "cookie-parser": "^1.4.7",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.21.1",
-    "fs-extra": "^11.2.0",
-    "joi": "^17.13.3",
-    "jsonwebtoken": "^9.0.2",
-    "multer": "^2.0.2",
-    "node-pty": "^1.0.0",
-    "node-stream-zip": "^1.15.0",
-    "read-last-lines": "^1.8.0",
-    "socket.io": "^4.8.1",
-    "tree-kill": "^1.2.2",
-    "uuid": "^11.0.3"
+    "@fastify/busboy": "3.2.2",
+    "@socket.io/bun-engine": "0.1.1",
+    "@zip.js/zip.js": "2.8.34",
+    "jose": "6.2.10",
+    "socket.io": "4.8.3"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.0",
+    "socket.io-client": "4.8.3",
+    "typescript": "7.0.2"
   }
 }

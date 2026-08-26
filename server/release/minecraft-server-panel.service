@@ -1,0 +1,36 @@
+[Unit]
+Description=Minecraft Server Panel
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=minecraft-panel
+Group=minecraft-panel
+WorkingDirectory=/opt/minecraft-server-panel
+Environment=HOME=/opt/minecraft-server-panel
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStartPre=/opt/minecraft-server-panel/minecraft-server-panel doctor
+ExecStart=/opt/minecraft-server-panel/minecraft-server-panel
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=75s
+KillMode=mixed
+UMask=0077
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/opt/minecraft-server-panel/panel-data
+
+[Install]
+WantedBy=multi-user.target

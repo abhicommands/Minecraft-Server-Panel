@@ -1,0 +1,163 @@
+name: Continuous integration
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend quality and static build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: client
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+      - name: Install locked frontend dependencies
+        run: bun ci
+      - name: Verify frontend/backend Socket.IO compatibility
+        working-directory: .
+        run: >-
+          bun -e 'const frontend = await Bun.file("client/package.json").json();
+          const backend = await Bun.file("server/package.json").json();
+          if (frontend.dependencies["socket.io-client"] !== backend.devDependencies["socket.io-client"])
+          throw new Error("socket.io-client versions must match")'
+      - name: Reject frontend runtime environment files and development URLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in .env .env.local .env.development .env.development.local .env.production .env.production.local; do
+            if [[ -e "$file" ]]; then
+              echo "::error::Frontend configuration must remain same-origin; remove client/$file."
+              exit 1
+            fi
+          done
+          if grep -R -E -n --exclude='*.map' \
+            'https?://(localhost|127\.0\.0\.1)(:[0-9]+)?' src index.html public; then
+            echo "::error::Frontend source contains a hard-coded development URL."
+            exit 1
+          fi
+      - name: Lint frontend
+        run: bun run lint
+      - name: Build environment-neutral frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+          vite_environment="$(env | sed -n '/^VITE_/p')"
+          if [[ -n "$vite_environment" ]]; then
+            echo "::error::Frontend builds must not receive VITE_* environment variables."
+            exit 1
+          fi
+          env -u VITE_API_URL -u VITE_SOCKET_URL -u VITE_SOCKET_PATH bun run build
+          test -f dist/index.html
+          if grep -R -E -n --exclude='*.map' \
+            'https?://(localhost|127\.0\.0\.1)(:[0-9]+)?' dist; then
+            echo "::error::Compiled frontend contains a hard-coded development URL."
+            exit 1
+          fi
+      - name: Audit frontend dependencies
+        run: bun audit
+      - name: Report frontend licenses
+        run: bun pm licenses
+      - name: Upload verified static frontend
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ci-frontend-static
+          path: client/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  backend:
+    name: Backend ${{ matrix.target }} native executable
+    needs: frontend
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: darwin-arm64
+            binary: minecraft-server-panel-darwin-arm64
+          - os: ubuntu-24.04
+            target: linux-x64
+            binary: minecraft-server-panel-linux-x64
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+      - name: Download verified static frontend
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ci-frontend-static
+          path: client/dist
+      - name: Verify static frontend input
+        working-directory: .
+        run: test -f client/dist/index.html
+      - name: Install locked backend dependencies
+        run: bun ci
+      - name: Type-check backend
+        run: bun run typecheck
+      - name: Test backend
+        run: bun test --parallel
+      - name: Audit backend dependencies
+        run: bun audit
+      - name: Report backend licenses
+        run: bun pm licenses
+      - name: Reject native Node addons
+        shell: bash
+        run: |
+          set -euo pipefail
+          addon="$(find node_modules -type f -name '*.node' -print -quit)"
+          if [[ -n "$addon" ]]; then
+            echo "::error file=server/$addon::Native Node addons are not allowed in the standalone backend."
+            exit 1
+          fi
+      - name: Validate release installer syntax
+        run: bash -n release/install.sh
+      - name: Build native executable
+        env:
+          PANEL_BUILD_TARGET: ${{ matrix.target }}
+          PANEL_USE_EXISTING_FRONTEND_DIST: "true"
+        run: bun run build
+      - name: Verify executable checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          shasum -a 256 -c "${{ matrix.binary }}.sha256"
+      - name: Smoke-test standalone executable
+        run: bun run smoke:compiled
+      - name: Install production-installer test dependency
+        if: matrix.target == 'linux-x64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y expect
+      - name: Smoke-test production system installer
+        if: matrix.target == 'linux-x64'
+        run: bash tests/system-installer-smoke.sh dist/minecraft-server-panel-linux-x64

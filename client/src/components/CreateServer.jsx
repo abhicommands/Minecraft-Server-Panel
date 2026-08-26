@@ -67,15 +67,18 @@ const CreateMinecraftServer = () => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    const memory = Number(memoryGB);
+    const serverPort = Number(port);
+    const distance = Number(renderDistance);
     if (
       !serverName ||
-      !memoryGB ||
       !minecraftVersion ||
-      !port ||
       !serverType ||
-      !renderDistance
+      !Number.isInteger(memory) ||
+      !Number.isInteger(serverPort) ||
+      !Number.isInteger(distance)
     ) {
-      alert("Please fill all fields before submitting!");
+      alert("Please fill every field with a valid value before submitting.");
       return;
     }
 
@@ -86,11 +89,11 @@ const CreateMinecraftServer = () => {
         `${API_URL}/servers`,
         {
           name: serverName,
-          memory: memoryGB,
+          memory,
           version: minecraftVersion,
-          port: port,
+          port: serverPort,
           serverType: serverType,
-          renderDistance: renderDistance,
+          renderDistance: distance,
           startupFlags,
         },
         { withCredentials: true }
@@ -99,7 +102,15 @@ const CreateMinecraftServer = () => {
         window.location.href = "/";
       })
       .catch((err) => {
-        alert("Failed to create the server. Please try again.");
+        const responseMessage =
+          typeof err.response?.data === "string"
+            ? err.response.data
+            : err.response?.data?.error;
+        alert(
+          responseMessage
+            ? `Failed to create the server: ${responseMessage}`
+            : "Failed to create the server. Please try again."
+        );
         console.error("Error:", err);
         setLoading(false);
       });

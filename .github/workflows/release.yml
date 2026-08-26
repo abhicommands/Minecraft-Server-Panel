@@ -1,0 +1,298 @@
+name: Tagged release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: Validate release tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+
+    steps:
+      - name: Check out complete history
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+      - name: Install Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+      - id: release
+        name: Validate tag, package versions, and release ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tags must use semantic versioning, for example v1.2.3 or v1.2.3-rc.1."
+            exit 1
+          fi
+          package_version="${GITHUB_REF_NAME#v}"
+          RELEASE_PACKAGE_VERSION="$package_version" bun -e '
+            const expected = process.env.RELEASE_PACKAGE_VERSION;
+            for (const file of ["package.json", "server/package.json", "client/package.json"]) {
+              const manifest = await Bun.file(file).json();
+              if (manifest.version !== expected) {
+                throw new Error(`${file} version ${manifest.version} does not match release ${expected}`);
+              }
+            }
+          '
+          release_branch=""
+          for candidate in origin/main origin/master; do
+            if git show-ref --verify --quiet "refs/remotes/$candidate"; then
+              release_branch="$candidate"
+              break
+            fi
+          done
+          if [[ -z "$release_branch" ]]; then
+            echo "::error::Neither origin/main nor origin/master exists."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "$release_branch"; then
+            echo "::error::Tagged commit $GITHUB_SHA is not contained in $release_branch."
+            exit 1
+          fi
+          echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+
+  frontend:
+    name: Build environment-neutral frontend
+    needs: metadata
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: client
+
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+      - run: bun ci
+      - name: Verify frontend/backend Socket.IO test version
+        run: |
+          bun -e 'const frontend = await Bun.file("package.json").json(); const backend = await Bun.file("../server/package.json").json(); if (frontend.dependencies["socket.io-client"] !== backend.devDependencies["socket.io-client"]) throw new Error("socket.io-client versions must match")'
+      - run: bun run lint
+      - name: Build frontend without Vite environment values
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in .env .env.local .env.development .env.development.local .env.production .env.production.local; do
+            if [[ -e "$file" ]]; then
+              echo "::error::Release frontend must not load $file"
+              exit 1
+            fi
+          done
+          if grep -R -E -n --exclude='*.map' \
+            'https?://(localhost|127\.0\.0\.1)(:[0-9]+)?' src index.html public; then
+            echo "::error::Frontend source contains a hard-coded development URL"
+            exit 1
+          fi
+          vite_environment="$(env | sed -n '/^VITE_/p')"
+          if [[ -n "$vite_environment" ]]; then
+            echo "::error::Release frontend must be built without VITE_* environment variables"
+            exit 1
+          fi
+          env -u VITE_API_URL -u VITE_SOCKET_URL -u VITE_SOCKET_PATH bun run build
+          test -f dist/index.html
+          if grep -R -E -n --exclude='*.map' \
+            'https?://(localhost|127\.0\.0\.1)(:[0-9]+)?' dist; then
+            echo "::error::Release frontend contains a hard-coded development URL"
+            exit 1
+          fi
+      - run: bun audit
+      - run: bun pm licenses
+      - name: Package frontend for native release jobs
+        run: tar -czf frontend-static.tar.gz -C dist .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-frontend-static
+          path: client/frontend-static.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  native:
+    name: Build ${{ matrix.target }} full archive
+    needs:
+      - metadata
+      - frontend
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: darwin-arm64
+            binary: minecraft-server-panel-darwin-arm64
+          - os: ubuntu-24.04
+            target: linux-x64
+            binary: minecraft-server-panel-linux-x64
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.0
+      - run: bun ci
+      - run: bun run typecheck
+      - run: bun test --parallel
+      - run: bun audit
+      - run: bun pm licenses
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-frontend-static
+          path: server/release-input
+      - name: Prepare embedded frontend assets
+        run: |
+          mkdir -p ../client/dist
+          tar -xzf release-input/frontend-static.tar.gz -C ../client/dist
+          test -f ../client/dist/index.html
+      - run: PANEL_USE_EXISTING_FRONTEND_DIST=true PANEL_BUILD_TARGET=${{ matrix.target }} bun run build
+      - run: bun run smoke:compiled
+      - name: Install production-installer test dependency
+        if: matrix.target == 'linux-x64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y expect
+      - name: Smoke-test production system installer
+        if: matrix.target == 'linux-x64'
+        run: bash tests/system-installer-smoke.sh dist/minecraft-server-panel-linux-x64
+      - name: Reject native Node addons
+        run: test -z "$(find node_modules -type f -name '*.node' -print -quit)"
+      - name: Assemble full native archive
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+          RELEASE_TARGET: ${{ matrix.target }}
+          RELEASE_BINARY: ${{ matrix.binary }}
+        run: |
+          set -euo pipefail
+          release_name="minecraft-server-panel-${RELEASE_VERSION}-${RELEASE_TARGET}"
+          release_root="release-stage/${release_name}"
+          mkdir -p "$release_root" release-output
+
+          (
+            cd dist
+            shasum -a 256 -c "${RELEASE_BINARY}.sha256"
+          )
+          bash -n release/install.sh
+          cp "dist/${RELEASE_BINARY}" "$release_root/minecraft-server-panel"
+          cp ../LICENSE "$release_root/LICENSE"
+          printf '%s\n' "$RELEASE_TARGET" > "$release_root/TARGET"
+          cp release/install.sh "$release_root/install.sh"
+          chmod 0755 "$release_root/minecraft-server-panel" "$release_root/install.sh"
+          mkdir -p "$release_root/install"
+          cp release/README.md "$release_root/install/README.md"
+          cp release/Caddyfile.example "$release_root/install/Caddyfile.example"
+          cp release/minecraft-server-panel.service "$release_root/install/minecraft-server-panel.service"
+
+          (
+            cd "$release_root"
+            shasum -a 256 \
+              minecraft-server-panel \
+              LICENSE \
+              TARGET \
+              install.sh \
+              install/README.md \
+              install/Caddyfile.example \
+              install/minecraft-server-panel.service \
+              > SHA256SUMS
+            shasum -a 256 -c SHA256SUMS
+          )
+
+          archive="release-output/${release_name}.tar.gz"
+          tar -czf "$archive" -C release-stage "$release_name"
+          archive_listing="${archive}.contents"
+          tar -tzf "$archive" > "$archive_listing"
+          grep -F -x -q "${release_name}/minecraft-server-panel" "$archive_listing"
+          grep -F -x -q "${release_name}/LICENSE" "$archive_listing"
+          grep -F -x -q "${release_name}/install.sh" "$archive_listing"
+          grep -F -x -q "${release_name}/SHA256SUMS" "$archive_listing"
+          rm "$archive_listing"
+          shasum -a 256 "$archive" | sed 's#  release-output/#  #' > "${archive}.sha256"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: full-release-${{ matrix.target }}
+          path: |
+            server/release-output/minecraft-server-panel-${{ needs.metadata.outputs.version }}-${{ matrix.target }}.tar.gz
+            server/release-output/minecraft-server-panel-${{ needs.metadata.outputs.version }}-${{ matrix.target }}.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish GitHub Release
+    needs:
+      - metadata
+      - native
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: full-release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Verify collected release assets
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd release-assets
+          for target in darwin-arm64 linux-x64; do
+            archive="minecraft-server-panel-${RELEASE_VERSION}-${target}.tar.gz"
+            test -f "$archive"
+            test -f "${archive}.sha256"
+            shasum -a 256 -c "${archive}.sha256"
+          done
+          cat \
+            "minecraft-server-panel-${RELEASE_VERSION}-darwin-arm64.tar.gz.sha256" \
+            "minecraft-server-panel-${RELEASE_VERSION}-linux-x64.tar.gz.sha256" \
+            > SHA256SUMS
+      - name: Attest native release archives
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: release-assets/*.tar.gz
+          create-storage-record: false
+      - name: Create and publish tagged release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_VERSION" >/dev/null 2>&1; then
+            echo "::error::Release $RELEASE_VERSION already exists; refusing to overwrite it."
+            exit 1
+          fi
+          gh release create "$RELEASE_VERSION" \
+            --verify-tag \
+            --draft \
+            --title "Minecraft Server Panel $RELEASE_VERSION" \
+            --generate-notes \
+            release-assets/*.tar.gz \
+            release-assets/*.tar.gz.sha256 \
+            release-assets/SHA256SUMS
+          gh release edit "$RELEASE_VERSION" --draft=false

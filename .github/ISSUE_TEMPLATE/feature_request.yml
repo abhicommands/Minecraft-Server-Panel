@@ -1,0 +1,56 @@
+name: Feature request
+description: Propose a focused improvement to Minecraft Server Panel
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the user problem before proposing an implementation. Search existing issues and explain why the feature belongs in this panel rather than an upstream Minecraft, Java, Bun, or proxy project.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Who has this problem, and what can they not do today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the user-visible outcome and an example workflow.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Include workarounds or simpler designs you considered.
+    validations:
+      required: true
+  - type: checkboxes
+    id: areas
+    attributes:
+      label: Affected areas
+      options:
+        - label: Frontend or accessibility
+        - label: REST API or Socket.IO contract
+        - label: Minecraft process management
+        - label: Files, uploads, archives, or backups
+        - label: Database or data layout
+        - label: Installer, Caddy, or release executable
+  - type: textarea
+    id: impact
+    attributes:
+      label: Compatibility and operational impact
+      description: Note migration, security, performance, new dependency, platform, or deployment effects.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched existing issues and pull requests for this request.
+          required: true
+        - label: I described a user problem, not only a preferred implementation.
+          required: true

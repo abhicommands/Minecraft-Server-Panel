@@ -1,0 +1,13 @@
+# The installer replaces this placeholder after strictly validating the domain.
+__PANEL_DOMAIN__ {
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:3001 {
+		# Keep Socket.IO clients connected briefly across Caddy configuration reloads.
+		stream_close_delay 5m
+		transport http {
+			# Bun closes idle HTTP connections after 30 seconds, so stay below that.
+			keepalive 20s
+		}
+	}
+}

@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/abhicommands/Minecraft-Server-Panel/security/advisories/new
+    about: Report vulnerabilities privately; do not create a public issue.
+  - name: Support guide
+    url: https://github.com/abhicommands/Minecraft-Server-Panel/blob/HEAD/SUPPORT.md
+    about: Read the support checklist before filing a reproducible bug.
+  - name: Code of Conduct report
+    url: https://github.com/abhicommands/Minecraft-Server-Panel/blob/HEAD/CODE_OF_CONDUCT.md
+    about: Follow the private reporting instructions; do not publish incident details.

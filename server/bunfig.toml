@@ -1,0 +1,7 @@
+[install]
+exact = true
+ignoreScripts = true
+minimumReleaseAge = 172800
+
+[test]
+root = "tests"

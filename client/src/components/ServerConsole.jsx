@@ -4,7 +4,7 @@ import io from "socket.io-client";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
-import { SOCKET_URL, SOCKET_PATH } from "../config";
+import { SOCKET_PATH } from "../config";
 
 function ServerConsole() {
   const { id } = useParams();
@@ -16,7 +16,7 @@ function ServerConsole() {
   const [serverStopped, setServerStopped] = useState(false);
 
   useEffect(() => {
-    const socketInstance = io(`${SOCKET_URL}`, {
+    const socketInstance = io({
       withCredentials: true,
       extraHeaders: {
         "server-id": id,

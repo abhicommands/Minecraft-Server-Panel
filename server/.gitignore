@@ -1,0 +1,12 @@
+.env
+dist/
+node_modules/
+coverage/
+server-info/
+panel-data/
+panel-test-data/
+dev-data/
+*.part
+.*.bun-build
+.release-public/
+benchmark-results/

@@ -1,0 +1,84 @@
+name: Bug report
+description: Report a reproducible problem in Minecraft Server Panel
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Search existing issues first. Do not include passwords, JWT secrets, cookies, private world data, or vulnerability details. Report vulnerabilities privately through SECURITY.md.
+  - type: input
+    id: version
+    attributes:
+      label: Panel version
+      description: Provide the release tag or full commit SHA. Do not write only "latest."
+      placeholder: v1.2.3 or 0123456789abcdef...
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: Installation type
+      options:
+        - GitHub Release executable
+        - Source development checkout
+        - Locally compiled executable
+        - Container or unofficial package
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system and architecture
+      placeholder: macOS 15 arm64 or Ubuntu 24.04 x86_64
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Bun and Java versions
+      description: For a release executable, Bun may be "not installed." Include Java when Minecraft process behavior is involved.
+      placeholder: Bun 1.4.0; OpenJDK 21.0.6
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Give the smallest repeatable sequence, including relevant configuration with secrets removed.
+      placeholder: |
+        1. Start the panel with ...
+        2. Open ...
+        3. Select ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Remove credentials, tokens, cookies, addresses, usernames, paths, and private server/world data.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-submission checks
+      options:
+        - label: I searched open and closed issues for this problem.
+          required: true
+        - label: I removed secrets and private data from this report.
+          required: true
+        - label: This is not a security vulnerability or code-of-conduct report.
+          required: true

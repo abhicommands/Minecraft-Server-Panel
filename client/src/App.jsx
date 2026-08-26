@@ -7,7 +7,7 @@ import CreateServer from "./components/CreateServer";
 import AppLayout from "./components/Layout";
 import Login from "./components/Login";
 import { ThemeProvider, createTheme } from "@mui/material/styles";
-import { API_URL, ensureEnv } from "./config";
+import { API_URL } from "./config";
 
 const theme = createTheme({
   palette: {
@@ -19,7 +19,6 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    ensureEnv();
     const fetchUserData = async () => {
       try {
         await axios.get(`${API_URL}/validate-session`, {
