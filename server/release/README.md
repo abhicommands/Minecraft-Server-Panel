@@ -30,9 +30,10 @@ On a fresh install, the executable asks for the administrator username (default
 address. It stores only the password's bcrypt hash and generates the JWT secret
 itself. An upgrade preserves the existing `panel-data` directory and does not
 reset credentials.
-It refuses a legacy `.env` beside the installed executable so hidden environment
-overrides cannot replace the generated TOML credentials. Upgrades verify the
-data owner instead of recursively rewriting ownership across large server trees.
+The executable reads application configuration only from the generated TOML;
+shell and service environment values cannot silently replace its credentials.
+Upgrades verify the data owner instead of recursively rewriting ownership across
+large server trees.
 
 The installer verifies every file against `SHA256SUMS`, creates a locked service
 account, installs the executable in `/opt/minecraft-server-panel`, installs and

@@ -23,7 +23,8 @@ Keep these project boundaries in mind:
 - The browser-facing `/api` and `/socket.io` contracts must remain compatible
   unless a reviewed change intentionally updates both sides.
 - Never commit `panel-data/`, credentials, JWT secrets, databases, Minecraft
-  worlds, generated archives, build output, or local `.env` files.
+  worlds, generated archives, build output, generated `config.toml`, or legacy
+  `.env` files.
 
 ## Development setup
 

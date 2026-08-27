@@ -63,12 +63,6 @@ export async function initializeConfiguration({
 }: InitializationOptions): Promise<InitializationResult> {
   const dataDir = path.join(home, dataDirectoryName);
   const configPath = path.join(dataDir, "config.toml");
-  const environmentPath = path.join(home, ".env");
-  if (mode !== "test" && (await Bun.file(environmentPath).exists())) {
-    throw new Error(
-      `Existing ${environmentPath} already configures the panel; move it aside before generating TOML`,
-    );
-  }
   if (await Bun.file(configPath).exists()) {
     throw new Error(`Refusing to replace existing configuration: ${configPath}`);
   }

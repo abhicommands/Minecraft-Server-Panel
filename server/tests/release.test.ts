@@ -33,6 +33,10 @@ describe("release operator assets", () => {
     expect(helpOutput).toContain("DNS name");
     expect(helpOutput).toContain("IP");
     expect(helpOutput).toContain("automatic HTTPS");
+
+    const installerSource = await Bun.file(installer).text();
+    expect(installerSource).toContain('init --address "$address"');
+    expect(installerSource).not.toContain("PANEL_SETUP_ADDRESS");
   });
 
   test("systemd leaves deployment mode to validated config and starts the default binary", async () => {
@@ -60,11 +64,13 @@ describe("release operator assets", () => {
     const continuousIntegration = await Bun.file(
       path.join(repositoryRoot, ".github", "workflows", "ci.yml"),
     ).text();
+    const buildSource = await Bun.file(path.join(repositoryRoot, "server", "build.ts")).text();
 
     expect(releaseWorkflow).toContain("os: macos-15");
     expect(continuousIntegration).toContain("os: macos-15");
     expect(releaseWorkflow).not.toContain("macos-14");
     expect(continuousIntegration).not.toContain("macos-14");
+    expect(buildSource).toContain("autoloadDotenv: false");
     expect(releaseWorkflow).toContain('cp ../LICENSE "$release_root/LICENSE"');
     expect(releaseWorkflow).toContain('grep -F -x -q "${release_name}/LICENSE"');
   });

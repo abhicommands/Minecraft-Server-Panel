@@ -281,8 +281,6 @@ install_local() {
   fi
 
   [[ ! -L "$local_install_dir" ]] || fail "Refusing to install through symlink: $local_install_dir"
-  [[ ! -e "${local_install_dir}/.env" && ! -L "${local_install_dir}/.env" ]] ||
-    fail "Move the legacy ${local_install_dir}/.env aside before using the TOML installer."
   require_command install
   require_command java
   require_command mv
@@ -349,8 +347,6 @@ install_system() {
     fail "Java must be installed in the system service PATH: $SYSTEM_SERVICE_PATH"
   [[ -d /run/systemd/system ]] || fail "systemd is not running on this machine."
   [[ ! -L "$SYSTEM_INSTALL_DIR" ]] || fail "Refusing to install through symlink: $SYSTEM_INSTALL_DIR"
-  [[ ! -e "${SYSTEM_INSTALL_DIR}/.env" && ! -L "${SYSTEM_INSTALL_DIR}/.env" ]] ||
-    fail "Move the legacy ${SYSTEM_INSTALL_DIR}/.env aside before using the TOML installer."
   [[ ! -L "${SYSTEM_INSTALL_DIR}/panel-data" ]] ||
     fail "Refusing to use symlinked data directory: ${SYSTEM_INSTALL_DIR}/panel-data"
   [[ ! -L "${SYSTEM_INSTALL_DIR}/panel-data/config.toml" ]] ||
@@ -367,7 +363,7 @@ install_system() {
   if [[ ! -f "${SYSTEM_INSTALL_DIR}/panel-data/config.toml" ]]; then
     [[ -t 0 && -t 1 ]] || fail "First-time production setup requires an interactive terminal."
     if [[ -n "$address" ]]; then
-      (cd -- "$SYSTEM_INSTALL_DIR" && PANEL_SETUP_ADDRESS="$address" ./minecraft-server-panel init)
+      (cd -- "$SYSTEM_INSTALL_DIR" && ./minecraft-server-panel init --address "$address")
     else
       (cd -- "$SYSTEM_INSTALL_DIR" && ./minecraft-server-panel init)
     fi

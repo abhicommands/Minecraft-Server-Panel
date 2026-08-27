@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, release, tmpdir } from "node:os";
 import { createServer } from "node:net";
 import path from "node:path";
@@ -14,6 +14,7 @@ const TEST_SECRET = "0123456789abcdef0123456789abcdef";
 
 interface RuntimeDefinition {
   name: string;
+  runtime: "bun" | "legacy-node";
   command: string[];
   cwd: string;
   dataDirectory: string;
@@ -87,23 +88,44 @@ async function startServer(definition: RuntimeDefinition): Promise<RunningServer
     mkdir(definition.cwd, { recursive: true }),
     mkdir(definition.dataDirectory, { recursive: true }),
   ]);
+  if (definition.runtime === "bun") {
+    // The Bun server intentionally accepts application configuration only from
+    // TOML; benchmark tuning variables remain separate harness inputs.
+    await writeFile(
+      path.join(definition.dataDirectory, "config.toml"),
+      Bun.TOML.stringify({
+        root_username: "benchmark",
+        root_password_hash: TEST_PASSWORD_HASH,
+        jwt_secret: TEST_SECRET,
+        port,
+        listen_host: "127.0.0.1",
+        deployment_mode: "test",
+        environment: "test",
+        secure_cookie: false,
+        allow_insecure_http: false,
+      })!,
+    );
+  }
+  const childEnvironment = definition.runtime === "legacy-node"
+    ? {
+        ...process.env,
+        ROOT_USERNAME: "benchmark",
+        ROOT_PASSWORD_HASH: TEST_PASSWORD_HASH,
+        JWT_SECRET: TEST_SECRET,
+        PORT: String(port),
+        PANEL_HOST: "127.0.0.1",
+        PANEL_DATA_DIR: definition.dataDirectory,
+        PANEL_PUBLIC_DIR: path.join(definition.dataDirectory, "public"),
+        PANEL_DEPLOYMENT_MODE: "test",
+        NODE_ENV: "test",
+        SECURE_STATUS: "false",
+        ALLOW_INSECURE_HTTP: "false",
+        CORSORIGIN: "",
+      }
+    : process.env;
   const child = Bun.spawn(definition.command, {
     cwd: definition.cwd,
-    env: {
-      ...process.env,
-      ROOT_USERNAME: "benchmark",
-      ROOT_PASSWORD_HASH: TEST_PASSWORD_HASH,
-      JWT_SECRET: TEST_SECRET,
-      PORT: String(port),
-      PANEL_HOST: "127.0.0.1",
-      PANEL_DATA_DIR: definition.dataDirectory,
-      PANEL_PUBLIC_DIR: path.join(definition.dataDirectory, "public"),
-      PANEL_DEPLOYMENT_MODE: "test",
-      NODE_ENV: "test",
-      SECURE_STATUS: "false",
-      ALLOW_INSECURE_HTTP: "false",
-      CORSORIGIN: "",
-    },
+    env: childEnvironment,
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -287,12 +309,14 @@ Optional:
     const definitions: RuntimeDefinition[] = [
       {
         name: `Bun ${Bun.version} source`,
+        runtime: "bun",
         command: [bunRuntime, path.resolve(import.meta.dir, "..", "server.ts"), "serve"],
         cwd: path.join(temporaryDirectory, "bun-source-home"),
-        dataDirectory: path.join(temporaryDirectory, "bun-source-data"),
+        dataDirectory: path.join(temporaryDirectory, "bun-source-home", "panel-data"),
       },
       {
         name: "Node legacy",
+        runtime: "legacy-node",
         command: [nodeBinary, "server.js"],
         cwd: legacyDirectory,
         dataDirectory: path.join(legacyDirectory, "benchmark-data"),
@@ -301,11 +325,17 @@ Optional:
     const binary = process.env.BUN_BENCH_BINARY?.trim();
     if (binary) {
       if (!path.isAbsolute(binary)) throw new Error("BUN_BENCH_BINARY must be absolute");
+      const binaryHome = path.join(temporaryDirectory, "bun-binary-home");
+      const benchmarkBinary = path.join(binaryHome, path.basename(binary));
+      await mkdir(binaryHome, { recursive: true });
+      await copyFile(binary, benchmarkBinary);
+      await chmod(benchmarkBinary, 0o755);
       definitions.splice(1, 0, {
         name: "Bun compiled executable",
-        command: [binary, "serve"],
-        cwd: path.dirname(binary),
-        dataDirectory: path.join(temporaryDirectory, "bun-binary-data"),
+        runtime: "bun",
+        command: [benchmarkBinary, "serve"],
+        cwd: binaryHome,
+        dataDirectory: path.join(binaryHome, "panel-data"),
       });
     }
 

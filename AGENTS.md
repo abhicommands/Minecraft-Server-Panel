@@ -24,8 +24,8 @@ change focused on the requested outcome.
 
 - Do not expose or invent credentials, tokens, cookies, private contact details,
   database contents, paths from user systems, or Minecraft world data.
-- Never embed `.env` values or `panel-data/config.toml` in frontend or compiled
-  assets.
+- Never embed `panel-data/config.toml` or any legacy environment secrets in
+  frontend or compiled assets. Active application configuration is TOML-only.
 - Preserve authentication, cookie, CORS, REST response, Socket.IO event, and
   same-origin contracts unless both sides and their tests intentionally change.
 - Treat file paths, multipart input, ZIP entries, subprocess arguments, and

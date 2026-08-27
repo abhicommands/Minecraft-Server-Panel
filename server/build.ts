@@ -70,7 +70,9 @@ try {
         target: build.target,
         outfile: path.join(outputDirectory, build.outfile),
         assets: ["./.release-public"],
-        autoloadDotenv: true,
+        // Deployment configuration is external TOML; never discover or embed a
+        // build-machine .env file in a standalone executable.
+        autoloadDotenv: false,
         autoloadBunfig: false,
         autoloadPackageJson: false,
         autoloadTsconfig: false,

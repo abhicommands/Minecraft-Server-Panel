@@ -16,7 +16,6 @@
     "typecheck": "tsc --noEmit",
     "build": "bun build.ts",
     "smoke:compiled": "bun tests/compiled-smoke.ts",
-    "hash-password": "bun scripts/hash-password.ts",
     "benchmark:archive": "bun benchmarks/archive.bench.ts",
     "benchmark:database": "bun benchmarks/database.bench.ts",
     "benchmark:runtime-comparison": "bun benchmarks/runtime-comparison.bench.ts"

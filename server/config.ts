@@ -49,14 +49,6 @@ function required(value: unknown, name: string): string {
   return value.trim();
 }
 
-function environmentString(
-  env: NodeJS.ProcessEnv,
-  name: string,
-  fileValue: unknown,
-): unknown {
-  return env[name] === undefined ? fileValue : env[name];
-}
-
 function parseInteger(
   raw: unknown,
   name: string,
@@ -79,83 +71,72 @@ function parseBoolean(raw: unknown, name: string, defaultValue: boolean): boolea
   throw new Error(`${name} must be true or false`);
 }
 
-export function loadConfig(
-  env: NodeJS.ProcessEnv = process.env,
+interface ConfigLocation {
+  home?: string;
+  dataDirectoryName?: string;
+}
+
+export function loadConfig({
   home = applicationHome(),
-): AppConfig {
-  const dataDir = path.resolve(home, env.PANEL_DATA_DIR?.trim() || "panel-data");
+  dataDirectoryName = "panel-data",
+}: ConfigLocation = {}): AppConfig {
+  // Configuration and mutable state deliberately share one relocatable root. A
+  // compiled executable therefore never depends on its build machine or shell.
+  const dataDir = path.resolve(home, dataDirectoryName);
   const file = readConfigFile(dataDir);
-  const rootUsername = required(
-    environmentString(env, "ROOT_USERNAME", file.root_username),
-    "root_username / ROOT_USERNAME",
-  );
+  const rootUsername = required(file.root_username, "root_username");
   validatePanelUsername(rootUsername);
-  const rootPasswordHash = required(
-    environmentString(env, "ROOT_PASSWORD_HASH", file.root_password_hash),
-    "root_password_hash / ROOT_PASSWORD_HASH",
-  );
-  const jwtSecretText = required(
-    environmentString(env, "JWT_SECRET", file.jwt_secret),
-    "jwt_secret / JWT_SECRET",
-  );
-  const environment = required(
-    environmentString(env, "NODE_ENV", file.environment ?? "development"),
-    "environment / NODE_ENV",
-  );
+  const rootPasswordHash = required(file.root_password_hash, "root_password_hash");
+  const jwtSecretText = required(file.jwt_secret, "jwt_secret");
+  const environment = required(file.environment ?? "development", "environment");
   if (environment !== "development" && environment !== "production" && environment !== "test") {
-    throw new Error("environment / NODE_ENV must be development, production, or test");
+    throw new Error("environment must be development, production, or test");
   }
   const production = environment === "production";
-  const hostname = required(
-    environmentString(env, "PANEL_HOST", file.listen_host ?? "127.0.0.1"),
-    "listen_host / PANEL_HOST",
-  );
+  const hostname = required(file.listen_host ?? "127.0.0.1", "listen_host");
   if (!/^[a-zA-Z0-9.:-]+$/.test(hostname)) {
-    throw new Error("listen_host / PANEL_HOST must be a hostname or IP address");
+    throw new Error("listen_host must be a hostname or IP address");
   }
   const secureCookie = parseBoolean(
-    environmentString(env, "SECURE_STATUS", file.secure_cookie),
-    "secure_cookie / SECURE_STATUS",
+    file.secure_cookie,
+    "secure_cookie",
     production,
   );
   const allowInsecureHttp = parseBoolean(
-    environmentString(env, "ALLOW_INSECURE_HTTP", file.allow_insecure_http),
-    "allow_insecure_http / ALLOW_INSECURE_HTTP",
+    file.allow_insecure_http,
+    "allow_insecure_http",
     false,
   );
-  const deploymentModeValue = environmentString(
-    env,
-    "PANEL_DEPLOYMENT_MODE",
-    file.deployment_mode ?? (production ? (secureCookie ? "https" : "direct-http") : "test"),
-  );
+  const deploymentModeValue =
+    file.deployment_mode ?? (production ? (secureCookie ? "https" : "direct-http") : "test");
   if (
     deploymentModeValue !== "https" &&
     deploymentModeValue !== "direct-http" &&
     deploymentModeValue !== "test"
   ) {
-    throw new Error("deployment_mode / PANEL_DEPLOYMENT_MODE must be https, direct-http, or test");
+    throw new Error("deployment_mode must be https, direct-http, or test");
   }
   const deploymentMode = deploymentModeValue;
-  const publicAddressValue = environmentString(env, "PANEL_PUBLIC_ADDRESS", file.public_address);
+  const publicAddressValue = file.public_address;
   const publicAddress =
     publicAddressValue === undefined || publicAddressValue === null || publicAddressValue === ""
       ? null
-      : required(publicAddressValue, "public_address / PANEL_PUBLIC_ADDRESS");
-  const corsValue = environmentString(env, "CORSORIGIN", file.cors_origin);
+      : required(publicAddressValue, "public_address");
+  const corsValue = file.cors_origin;
   const corsOrigin =
     corsValue === undefined || corsValue === null || corsValue === ""
       ? null
-      : required(corsValue, "cors_origin / CORSORIGIN");
+      : required(corsValue, "cors_origin");
 
   if (!/^\$2[aby]\$\d{2}\$/.test(rootPasswordHash)) {
-    throw new Error("root_password_hash / ROOT_PASSWORD_HASH must be a bcrypt hash");
+    throw new Error("root_password_hash must be a bcrypt hash");
   }
   if (encoder.encode(jwtSecretText).byteLength < 32) {
-    throw new Error("jwt_secret / JWT_SECRET must contain at least 32 UTF-8 bytes");
+    throw new Error("jwt_secret must contain at least 32 UTF-8 bytes");
   }
   if (production && !secureCookie && !allowInsecureHttp) {
     throw new Error(
-      "Production without secure cookies requires allow_insecure_http / ALLOW_INSECURE_HTTP=true",
+      "Production without secure cookies requires allow_insecure_http=true",
     );
   }
   if (production && secureCookie && allowInsecureHttp) {
@@ -196,20 +177,18 @@ export function loadConfig(
     try {
       parsedOrigin = new URL(corsOrigin);
     } catch {
-      throw new Error("cors_origin / CORSORIGIN must be an absolute HTTP(S) origin");
+      throw new Error("cors_origin must be an absolute HTTP(S) origin");
     }
     if (!/^https?:$/.test(parsedOrigin.protocol) || parsedOrigin.origin !== corsOrigin) {
-      throw new Error("cors_origin / CORSORIGIN must be an exact HTTP(S) origin without a path");
+      throw new Error("cors_origin must be an exact HTTP(S) origin without a path");
     }
   }
 
   const databasePath = path.join(dataDir, "database", "panel.sqlite3");
   const serversPath = path.join(dataDir, "servers");
-  const publicDir = env.PANEL_PUBLIC_DIR?.trim()
-    ? path.resolve(home, env.PANEL_PUBLIC_DIR)
-    : Bun.isStandaloneExecutable
-      ? path.join(import.meta.dir, ".release-public")
-      : path.resolve(home, "public");
+  const publicDir = Bun.isStandaloneExecutable
+    ? path.join(import.meta.dir, ".release-public")
+    : path.resolve(home, "public");
   mkdirSync(path.dirname(databasePath), { recursive: true });
   mkdirSync(serversPath, { recursive: true });
 
@@ -217,7 +196,7 @@ export function loadConfig(
     rootUsername,
     rootPasswordHash,
     jwtSecret: encoder.encode(jwtSecretText),
-    port: parseInteger(environmentString(env, "PORT", file.port), "port / PORT", 3001, 1, 65_535),
+    port: parseInteger(file.port, "port", 3001, 1, 65_535),
     hostname,
     corsOrigin,
     secureCookie,
@@ -230,8 +209,8 @@ export function loadConfig(
     serversPath,
     publicDir,
     uploadMaxBytes: parseInteger(
-      environmentString(env, "UPLOAD_MAX_BYTES", file.upload_max_bytes),
-      "upload_max_bytes / UPLOAD_MAX_BYTES",
+      file.upload_max_bytes,
+      "upload_max_bytes",
       2_147_483_648,
       1,
       Number.MAX_SAFE_INTEGER,

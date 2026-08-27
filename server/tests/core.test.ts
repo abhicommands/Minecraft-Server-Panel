@@ -19,6 +19,7 @@ import {
   validateCreateBody,
 } from "../routes/serverManagementRoutes.ts";
 import type { AppConfig } from "../types.ts";
+import { createTestConfig, writeTestConfig } from "./testConfig.ts";
 import {
   composeStartupArgv,
   ensureValidStartupFlags,
@@ -54,7 +55,7 @@ describe("configuration", () => {
       })!,
     );
 
-    const config = loadConfig({}, home);
+    const config = loadConfig({ home });
     expect(config.dataDir).toBe(dataDir);
     expect(config.databasePath).toBe(path.join(dataDir, "database", "panel.sqlite3"));
     expect(config.serversPath).toBe(path.join(dataDir, "servers"));
@@ -63,21 +64,9 @@ describe("configuration", () => {
     expect(config.corsOrigin).toBeNull();
   });
 
-  test("validates and resolves external data paths", async () => {
+  test("validates and resolves an explicitly selected data directory", async () => {
     const cwd = await temporaryDirectory();
-    const config = loadConfig(
-      {
-        ROOT_USERNAME: "admin",
-        ROOT_PASSWORD_HASH: "$2b$10$VKuqhD4RPv0X5seKqhXDXOpzgwmUpJCpu3g50MgIKCluUx2nX/Wri",
-        JWT_SECRET: "0123456789abcdef0123456789abcdef",
-        PORT: "3001",
-        CORSORIGIN: "http://localhost:5173",
-        SECURE_STATUS: "false",
-        NODE_ENV: "development",
-        PANEL_DATA_DIR: "data",
-      },
-      cwd,
-    );
+    const config = await createTestConfig(cwd, { cors_origin: "http://localhost:5173" }, "data");
     expect(config.dataDir).toBe(path.join(cwd, "data"));
     expect(config.databasePath).toBe(path.join(cwd, "data", "database", "panel.sqlite3"));
     expect(config.uploadMaxBytes).toBe(2_147_483_648);
@@ -85,32 +74,38 @@ describe("configuration", () => {
 
   test("rejects short JWT secrets and insecure production cookies", async () => {
     const cwd = await temporaryDirectory();
-    const base = {
-      ROOT_USERNAME: "admin",
-      ROOT_PASSWORD_HASH: "$2b$10$VKuqhD4RPv0X5seKqhXDXOpzgwmUpJCpu3g50MgIKCluUx2nX/Wri",
-      JWT_SECRET: "short",
-      CORSORIGIN: "https://panel.example",
-      SECURE_STATUS: "false",
-      NODE_ENV: "production",
-    };
-    expect(() => loadConfig(base, cwd)).toThrow();
+    await writeTestConfig(cwd, {
+      jwt_secret: "short",
+      cors_origin: "https://panel.example",
+      secure_cookie: false,
+      environment: "production",
+      deployment_mode: "direct-http",
+      listen_host: "0.0.0.0",
+      allow_insecure_http: true,
+    });
+    expect(() => loadConfig({ home: cwd })).toThrow("jwt_secret");
   });
 
   test("requires an explicit opt-in for direct HTTP production", async () => {
     const cwd = await temporaryDirectory();
-    const base = {
-      ROOT_USERNAME: "admin",
-      ROOT_PASSWORD_HASH: "$2b$10$VKuqhD4RPv0X5seKqhXDXOpzgwmUpJCpu3g50MgIKCluUx2nX/Wri",
-      JWT_SECRET: "0123456789abcdef0123456789abcdef",
-      SECURE_STATUS: "false",
-      NODE_ENV: "production",
-      PANEL_DEPLOYMENT_MODE: "direct-http",
-      PANEL_PUBLIC_ADDRESS: "203.0.113.10",
-      PANEL_HOST: "0.0.0.0",
-    };
-    expect(() => loadConfig(base, cwd)).toThrow("ALLOW_INSECURE_HTTP=true");
+    await writeTestConfig(cwd, {
+      secure_cookie: false,
+      environment: "production",
+      deployment_mode: "direct-http",
+      public_address: "203.0.113.10",
+      listen_host: "0.0.0.0",
+      allow_insecure_http: false,
+    });
+    expect(() => loadConfig({ home: cwd })).toThrow("allow_insecure_http=true");
 
-    const config = loadConfig({ ...base, ALLOW_INSECURE_HTTP: "true" }, cwd);
+    const config = await createTestConfig(cwd, {
+      secure_cookie: false,
+      environment: "production",
+      deployment_mode: "direct-http",
+      public_address: "203.0.113.10",
+      listen_host: "0.0.0.0",
+      allow_insecure_http: true,
+    });
     expect(config.production).toBe(true);
     expect(config.secureCookie).toBe(false);
     expect(config.allowInsecureHttp).toBe(true);
@@ -269,17 +264,7 @@ describe("path safety", () => {
 describe("fresh SQLite schema", () => {
   test("persists metadata while deriving portable server paths from the UUID", async () => {
     const dataDir = await temporaryDirectory();
-    const config = loadConfig(
-      {
-        ROOT_USERNAME: "admin",
-        ROOT_PASSWORD_HASH: "$2b$10$VKuqhD4RPv0X5seKqhXDXOpzgwmUpJCpu3g50MgIKCluUx2nX/Wri",
-        JWT_SECRET: "0123456789abcdef0123456789abcdef",
-        CORSORIGIN: "http://localhost:5173",
-        SECURE_STATUS: "false",
-        PANEL_DATA_DIR: dataDir,
-      },
-      dataDir,
-    );
+    const config = await createTestConfig(dataDir, { cors_origin: "http://localhost:5173" }, ".");
     const database = new PanelDatabase(config);
     const uuid = crypto.randomUUID();
     database.insertServer({

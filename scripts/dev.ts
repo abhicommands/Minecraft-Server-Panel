@@ -5,7 +5,6 @@ const applications = [
   {
     name: "backend",
     directory: path.join(repositoryRoot, "server"),
-    envFile: path.join(repositoryRoot, "server", ".env"),
     configFile: path.join(repositoryRoot, "server", "panel-data", "config.toml"),
     url: "http://localhost:3001",
     command: ["--watch", "server.ts"],
@@ -13,7 +12,6 @@ const applications = [
   {
     name: "frontend",
     directory: path.join(repositoryRoot, "client"),
-    envFile: null,
     configFile: null,
     url: "http://localhost:5173",
     command: ["node_modules/vite/bin/vite.js"],
@@ -22,8 +20,6 @@ const applications = [
 
 for (const application of applications) {
   if (
-    application.envFile &&
-    !(await Bun.file(application.envFile).exists()) &&
     application.configFile &&
     !(await Bun.file(application.configFile).exists())
   ) {

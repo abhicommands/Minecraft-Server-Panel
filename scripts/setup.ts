@@ -18,11 +18,7 @@ for (const project of projects) {
 
 const backendHome = path.join(repositoryRoot, "server");
 const generatedConfig = path.join(backendHome, "panel-data", "config.toml");
-const environmentConfig = path.join(backendHome, ".env");
-if (
-  !(await Bun.file(generatedConfig).exists()) &&
-  !(await Bun.file(environmentConfig).exists())
-) {
+if (!(await Bun.file(generatedConfig).exists())) {
   console.log("\nNo backend configuration exists yet; starting secure development setup.");
   const initialize = Bun.spawn([process.execPath, "server.ts", "init", "--development"], {
     cwd: backendHome,

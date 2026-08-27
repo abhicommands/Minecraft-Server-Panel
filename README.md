@@ -10,6 +10,7 @@ backend that compiles into standalone macOS and Linux executables.
 [Getting started](#start-a-fresh-development-environment) ·
 [Production](#production-release-and-reverse-proxy) ·
 [Releases](#github-actions-and-release-notes) ·
+[Architecture](docs/ARCHITECTURE.md) ·
 [Benchmarks](docs/BENCHMARKING.md) ·
 [Contributing](CONTRIBUTING.md) ·
 [Security](SECURITY.md)
@@ -22,7 +23,7 @@ commands.
 Source development does not compile an executable. An explicit release build
 creates self-contained macOS ARM64 and Linux x64 executables with the production
 frontend embedded. A deployed release needs Java, but it does not need Bun,
-Node, npm, `node_modules`, a frontend `.env`, or separate static files.
+Node, npm, `node_modules`, application `.env` files, or separate static files.
 
 ## Repository map
 
@@ -185,9 +186,10 @@ an installation with a small number of servers, but it would break URLs and
 directory names. `bun run benchmark:database` validates the query plan and
 measures the production lookup path; see [Benchmarking](docs/BENCHMARKING.md).
 
-`PANEL_DATA_DIR` may intentionally override the location. Relative values are
-resolved against application home; services should use an absolute value when
-placing data elsewhere. Keeping `panel-data` adjacent is the simplest default.
+Application configuration is TOML-only. The backend always resolves
+`panel-data` from application home, so configuration, database, servers, and
+backups move and restore as one explicit unit. Environment variables are used
+only by development/build tooling and are not runtime application settings.
 
 ## Build standalone full-stack executables
 
@@ -434,8 +436,8 @@ contract. The complete compatibility and performance decision table is in
 
 The Bun rewrite now intentionally starts with a fresh schema and layout. It does
 not store the old absolute `path`/`backupPath` columns and rejects the earlier
-pre-reset Bun schema. Do not point `PANEL_DATA_DIR` at `legacy-node-server/`, and
-never run the legacy and Bun backends against the same data directory.
+pre-reset Bun schema. Never copy legacy data directly into `server/panel-data`,
+and never run the legacy and Bun backends against the same data directory.
 
 For another fresh Bun-only reset, first stop the panel and every Java child,
 back up anything wanted from `server/panel-data`, then remove or move

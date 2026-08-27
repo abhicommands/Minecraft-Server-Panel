@@ -84,31 +84,6 @@ const executable = path.join(temporaryDirectory, executableName());
 let backend: Bun.Subprocess | undefined;
 let socket: Socket | undefined;
 
-function cleanRuntimeEnvironment(): Record<string, string | undefined> {
-  const environment = { ...process.env };
-  for (const name of [
-    "ROOT_USERNAME",
-    "ROOT_PASSWORD_HASH",
-    "JWT_SECRET",
-    "PORT",
-    "CORSORIGIN",
-    "SECURE_STATUS",
-    "ALLOW_INSECURE_HTTP",
-    "NODE_ENV",
-    "PANEL_HOST",
-    "PANEL_PUBLIC_ADDRESS",
-    "PANEL_DEPLOYMENT_MODE",
-    "PANEL_DATA_DIR",
-    "PANEL_PUBLIC_DIR",
-    "UPLOAD_MAX_BYTES",
-    "BUN_INSTALL",
-    "NODE_PATH",
-  ]) {
-    delete environment[name];
-  }
-  return environment;
-}
-
 try {
   await Promise.all([
     mkdir(path.join(dataDirectory, "database"), { recursive: true }),
@@ -154,19 +129,7 @@ try {
     { mode: 0o600 },
   );
 
-  const config = loadConfig(
-    {
-      ROOT_USERNAME: "admin",
-      ROOT_PASSWORD_HASH: PASSWORD_HASH,
-      JWT_SECRET,
-      PORT: String(port),
-      CORSORIGIN: "http://localhost:5173",
-      SECURE_STATUS: "false",
-      NODE_ENV: "development",
-      PANEL_DATA_DIR: dataDirectory,
-    },
-    temporaryDirectory,
-  );
+  const config = loadConfig({ home: temporaryDirectory });
   const database = new PanelDatabase(config);
   database.insertServer({
     uuid: serverId,
@@ -180,7 +143,7 @@ try {
   database.close();
 
   const childEnvironment = {
-    ...cleanRuntimeEnvironment(),
+    ...process.env,
     PATH: `${binDirectory}:/usr/bin:/bin`,
   };
   const doctor = Bun.spawn([executable, "doctor"], {

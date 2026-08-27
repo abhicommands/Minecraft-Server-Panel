@@ -65,7 +65,3 @@ export async function promptAndHashPassword(): Promise<string> {
   validatePanelPassword(password);
   return Bun.password.hash(password, { algorithm: "bcrypt", cost: 10 });
 }
-
-export function escapedBcryptEnvironmentValue(hash: string): string {
-  return hash.replaceAll("$", "\\$");
-}

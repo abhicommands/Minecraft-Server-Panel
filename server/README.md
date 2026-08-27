@@ -29,7 +29,7 @@ bun run dev
 ```
 
 The root setup command runs locked `bun ci` installs here and in `client/`. If
-`panel-data/config.toml` and `.env` are both absent, it launches:
+`panel-data/config.toml` is absent, it launches:
 
 ```sh
 bun server.ts init --development
@@ -55,9 +55,9 @@ bun run dev
 ```
 
 `bun run init` is the development initializer and refuses to overwrite an
-existing `panel-data/config.toml` or coexist with a backend `.env`.
+existing `panel-data/config.toml`.
 
-## Configuration precedence
+## Configuration
 
 The canonical configuration is `panel-data/config.toml`. A development file
 looks like:
@@ -82,39 +82,16 @@ or IP address: DNS selects loopback plus secure cookies/Caddy, while an IP
 selects a public bind plus explicitly acknowledged direct HTTP. Restart after
 editing configuration; no rebuild is required.
 
-Environment values override TOML values. The tracked `.env.example` is
-documentation for service/container overrides and compatibility deployments; it
-is not an active or required secret file. Copying it to `.env` changes runtime
-configuration and causes the interactive initializer to refuse to create TOML,
-so prefer generated TOML for normal local and release installs.
+`panel-data/config.toml` is the only application configuration source in both
+development and releases. The backend does not read credential, deployment, or
+data-path overrides from process environment variables, and compiled builds
+disable Bun's automatic dotenv loading. This makes the adjacent deployment
+directory the complete configuration and backup boundary.
 
-Supported overrides include:
-
-```dotenv
-ROOT_USERNAME=admin
-ROOT_PASSWORD_HASH=\$2b\$10\$...
-JWT_SECRET=at-least-32-random-characters
-PANEL_HOST=127.0.0.1
-PORT=3001
-SECURE_STATUS=false
-ALLOW_INSECURE_HTTP=false
-PANEL_DEPLOYMENT_MODE=test
-PANEL_PUBLIC_ADDRESS=127.0.0.1
-NODE_ENV=development
-PANEL_DATA_DIR=./panel-data
-UPLOAD_MAX_BYTES=2147483648
-```
-
-`CORSORIGIN` is optional for a genuinely cross-origin client. Normal Vite and
-Caddy layouts do not set it because all browser traffic uses one origin. A
-relative `PANEL_DATA_DIR` resolves against application home; use an absolute
-path only for an intentional external data mount. `.env` values are never
-inlined into compiled executables.
-
-`bun run hash-password` remains available for manually maintained environment
-configuration. It asks for a chosen password and prints an escaped bcrypt line
-suitable for Bun's `.env` expansion rules. It does not generate the login
-password.
+`cors_origin` is optional for a genuinely cross-origin client. Normal Vite and
+Caddy layouts omit it because all browser traffic uses one origin. The data
+directory name is fixed to `panel-data`; relocate the complete application home
+rather than splitting configuration and mutable state across hidden locations.
 
 ## Application home and mutable layout
 

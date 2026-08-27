@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:net";
 import path from "node:path";
 import { io as createSocket, type Socket } from "socket.io-client";
-import { loadConfig } from "../config.ts";
 import { startApplication, type RunningApplication } from "../server.ts";
 import { newServerLayout } from "../utils/serverLayout.ts";
+import { createTestConfig } from "./testConfig.ts";
 
 let application: RunningApplication | null = null;
 let directory: string | null = null;
@@ -25,19 +25,7 @@ async function startTestApplication(
   options: { frontend?: boolean } = {},
 ): Promise<{ baseUrl: string; cookie: string }> {
   directory = await mkdtemp(path.join(tmpdir(), "panel-bun-server-test-"));
-  const config = loadConfig(
-    {
-      ROOT_USERNAME: "admin",
-      ROOT_PASSWORD_HASH: "$2b$10$VKuqhD4RPv0X5seKqhXDXOpzgwmUpJCpu3g50MgIKCluUx2nX/Wri",
-      JWT_SECRET: "0123456789abcdef0123456789abcdef",
-      PORT: "3001",
-      CORSORIGIN: "http://localhost:5173",
-      SECURE_STATUS: "false",
-      NODE_ENV: "development",
-      PANEL_DATA_DIR: directory,
-    },
-    directory,
-  );
+  const config = await createTestConfig(directory, { cors_origin: "http://localhost:5173" });
   config.port = await new Promise<number>((resolve, reject) => {
     const probe = createServer();
     probe.once("error", reject);

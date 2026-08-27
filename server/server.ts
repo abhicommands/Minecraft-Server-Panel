@@ -244,18 +244,36 @@ async function main(): Promise<void> {
 Usage:
   minecraft-server-panel          Production setup on first run, then start
   minecraft-server-panel --test   Isolated localhost setup, then start
+  minecraft-server-panel init [--development] [--address <DNS-or-IP>]
 
 The test configuration and data use panel-test-data; production uses panel-data.
 The compatibility diagnostics 'doctor', 'init', and 'serve' are also available.`);
       return;
     }
     if (command === "init") {
+      const initArguments = args.slice(1);
+      let development = false;
+      let publicAddress: string | undefined;
+      for (let index = 0; index < initArguments.length; index += 1) {
+        const argument = initArguments[index];
+        if (argument === "--development") {
+          if (development) throw new Error("--development may be specified only once");
+          development = true;
+          continue;
+        }
+        if (argument === "--address") {
+          if (publicAddress !== undefined) throw new Error("--address may be specified only once");
+          publicAddress = initArguments[index + 1]?.trim();
+          if (!publicAddress) throw new Error("--address requires a DNS name or IP address");
+          index += 1;
+          continue;
+        }
+        throw new Error(`Unknown init option '${argument}'`);
+      }
       await initializeConfiguration({
         home,
-        mode: args.includes("--development") ? "test" : "production",
-        ...(process.env.PANEL_SETUP_ADDRESS?.trim()
-          ? { publicAddress: process.env.PANEL_SETUP_ADDRESS.trim() }
-          : {}),
+        mode: development ? "test" : "production",
+        ...(publicAddress ? { publicAddress } : {}),
       });
     } else if (command === "doctor") {
       const config = loadConfig();
@@ -286,37 +304,10 @@ The compatibility diagnostics 'doctor', 'init', and 'serve' are also available.`
         if (!(await Bun.file(testConfigPath).exists())) {
           await initializeConfiguration({ home, mode: "test", dataDirectoryName: testDataName });
         }
-        const testEnvironment: NodeJS.ProcessEnv = {
-          ...process.env,
-          PANEL_DATA_DIR: testDataName,
-        };
-        for (const name of [
-          "ROOT_USERNAME",
-          "ROOT_PASSWORD_HASH",
-          "JWT_SECRET",
-          "PORT",
-          "CORSORIGIN",
-          "SECURE_STATUS",
-          "ALLOW_INSECURE_HTTP",
-          "NODE_ENV",
-          "PANEL_HOST",
-          "PANEL_PUBLIC_ADDRESS",
-          "PANEL_DEPLOYMENT_MODE",
-          "PANEL_PUBLIC_DIR",
-          "UPLOAD_MAX_BYTES",
-        ]) {
-          delete testEnvironment[name];
-        }
-        testEnvironment.PANEL_DATA_DIR = testDataName;
-        config = loadConfig(testEnvironment, home);
+        config = loadConfig({ home, dataDirectoryName: testDataName });
       } else {
         const configPath = path.join(home, "panel-data", "config.toml");
-        const environmentPath = path.join(home, ".env");
-        if (
-          !command &&
-          !(await Bun.file(configPath).exists()) &&
-          !(await Bun.file(environmentPath).exists())
-        ) {
+        if (!command && !(await Bun.file(configPath).exists())) {
           await initializeConfiguration({ home, mode: "production" });
         }
         config = loadConfig();
