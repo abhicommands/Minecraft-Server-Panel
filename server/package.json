@@ -21,15 +21,15 @@
     "benchmark:runtime-comparison": "bun benchmarks/runtime-comparison.bench.ts"
   },
   "dependencies": {
-    "@fastify/busboy": "3.2.2",
-    "@socket.io/bun-engine": "0.1.1",
-    "@zip.js/zip.js": "2.8.34",
-    "jose": "6.2.10",
-    "socket.io": "4.8.3"
+    "@fastify/busboy": "3.2.3",
+    "@socket.io/bun-engine": "0.1.2",
+    "@zip.js/zip.js": "2.23.0",
+    "jose": "6.2.12",
+    "socket.io": "4.8.4"
   },
   "devDependencies": {
-    "@types/bun": "1.4.0",
-    "socket.io-client": "4.8.3",
+    "@types/bun": "1.4.2",
+    "socket.io-client": "4.8.4",
     "typescript": "7.0.2"
   }
 }
